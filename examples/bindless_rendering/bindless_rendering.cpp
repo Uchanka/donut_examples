@@ -57,11 +57,12 @@ private:
     nvrhi::GraphicsPipelineHandle m_GraphicsPipeline;
 
     nvrhi::BufferHandle m_ViewConstants;
+    nvrhi::BufferHandle m_ViewConstantsLastFrame;
     
     nvrhi::TextureHandle m_DepthBuffer;
     nvrhi::TextureHandle m_ColorBuffer;
     nvrhi::FramebufferHandle m_Framebuffer;
-
+   
     std::shared_ptr<engine::ShaderFactory> m_ShaderFactory;
     std::unique_ptr<engine::Scene> m_Scene;
     std::shared_ptr<engine::DescriptorTableManager> m_DescriptorTableManager;
@@ -69,13 +70,16 @@ private:
 
     app::FirstPersonCamera m_Camera;
     engine::PlanarView m_View;
+    
+    bool m_EnableAnimations = true;
+    float m_WallclockTime = 0.f;
 
 public:
     using ApplicationBase::ApplicationBase;
 
     bool Init()
     {
-        std::filesystem::path sceneFileName = app::GetDirectoryWithExecutable().parent_path() / "media/glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf";
+        std::filesystem::path sceneFileName = app::GetDirectoryWithExecutable().parent_path() / "media/sponza-plus.scene.json";
         std::filesystem::path frameworkShaderPath = app::GetDirectoryWithExecutable() / "shaders/framework" / app::GetShaderTypeName(GetDevice()->getGraphicsAPI());
         std::filesystem::path appShaderPath = app::GetDirectoryWithExecutable() / "shaders/bindless_rendering" / app::GetShaderTypeName(GetDevice()->getGraphicsAPI());
         
@@ -116,13 +120,15 @@ public:
         m_Camera.SetMoveSpeed(3.f);
 
         m_ViewConstants = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstants", engine::c_MaxRenderPassConstantBufferVersions));
+        m_ViewConstantsLastFrame = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstantsLastFrame", engine::c_MaxRenderPassConstantBufferVersions));
         
         GetDevice()->waitForIdle();
 
         nvrhi::BindingSetDesc bindingSetDesc;
         bindingSetDesc.bindings = {
             nvrhi::BindingSetItem::ConstantBuffer(0, m_ViewConstants),
-            nvrhi::BindingSetItem::PushConstants(1, sizeof(int2)),
+            nvrhi::BindingSetItem::ConstantBuffer(1, m_ViewConstantsLastFrame),
+            nvrhi::BindingSetItem::PushConstants(2, sizeof(int2)),
             nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_Scene->GetInstanceBuffer()),
             nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_Scene->GetGeometryBuffer()),
             nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_Scene->GetMaterialBuffer()),
@@ -149,6 +155,13 @@ public:
     bool KeyboardUpdate(int key, int scancode, int action, int mods) override
     {
         m_Camera.KeyboardUpdate(key, scancode, action, mods);
+
+        if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
+        {
+            m_EnableAnimations = !m_EnableAnimations;
+            return true;
+        }
+
         return true;
     }
 
@@ -167,6 +180,22 @@ public:
     void Animate(float fElapsedTimeSeconds) override
     {
         m_Camera.Animate(fElapsedTimeSeconds);
+
+        if (IsSceneLoaded() && m_EnableAnimations)
+        {
+            m_WallclockTime += fElapsedTimeSeconds;
+            float offset = 0;
+
+            for (const auto& anim : m_Scene->GetSceneGraph()->GetAnimations())
+            {
+                float duration = anim->GetDuration();
+                float integral;
+                float animationTime = std::modf((m_WallclockTime + offset) / duration, &integral) * duration;
+                (void)anim->Apply(animationTime);
+                offset += 1.0f;
+            }
+        }
+
         GetDeviceManager()->SetInformativeWindowTitle(g_WindowTitle);
     }
 
@@ -207,7 +236,7 @@ public:
             framebufferDesc.addColorAttachment(m_ColorBuffer, nvrhi::AllSubresources);
             framebufferDesc.setDepthAttachment(m_DepthBuffer);
             m_Framebuffer = GetDevice()->createFramebuffer(framebufferDesc);
-
+            
             nvrhi::GraphicsPipelineDesc pipelineDesc;
             pipelineDesc.VS = m_VertexShader;
             pipelineDesc.PS = m_PixelShader;
@@ -227,10 +256,14 @@ public:
         
         m_CommandList->open();
 
-        m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        PlanarViewConstants viewConstants;
+        m_View.FillPlanarViewConstants(viewConstants);
+        m_CommandList->writeBuffer(m_ViewConstantsLastFrame, &viewConstants, sizeof(viewConstants));
+
+        m_Scene->Refresh(m_CommandList, GetFrameIndex());
+
         m_CommandList->clearDepthStencilTexture(m_DepthBuffer, nvrhi::AllSubresources, true, 0.f, true, 0);
 
-        PlanarViewConstants viewConstants;
         m_View.FillPlanarViewConstants(viewConstants);
         m_CommandList->writeBuffer(m_ViewConstants, &viewConstants, sizeof(viewConstants));
 
@@ -258,6 +291,7 @@ public:
         }
         
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
+        m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
 
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);

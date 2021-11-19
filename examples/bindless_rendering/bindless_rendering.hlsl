@@ -40,7 +40,8 @@ struct InstanceConstants
 };
 
 ConstantBuffer<PlanarViewConstants> g_View : register(b0);
-VK_PUSH_CONSTANT ConstantBuffer<InstanceConstants> g_Instance : register(b1);
+ConstantBuffer<PlanarViewConstants> g_ViewLastFrame : register(b1);
+VK_PUSH_CONSTANT ConstantBuffer<InstanceConstants> g_Instance : register(b2);
 StructuredBuffer<InstanceData> t_InstanceData : register(t0);
 StructuredBuffer<GeometryData> t_GeometryData : register(t1);
 StructuredBuffer<MaterialConstants> t_MaterialConstants : register(t2);
@@ -52,6 +53,7 @@ VK_BINDING(1, 1) Texture2D t_BindlessTextures[] : register(t0, space2);
 void vs_main(
     in uint i_vertexID : SV_VertexID,
     out float4 o_position : SV_Position,
+    out float3 o_positiondelta : PositionDelta,
     out float2 o_uv : TEXCOORD,
     out uint o_material : MATERIAL)
 {
@@ -68,14 +70,18 @@ void vs_main(
 
     float3 worldSpacePosition = mul(instance.transform, float4(objectSpacePosition, 1.0)).xyz;
     float4 clipSpacePosition = mul(float4(worldSpacePosition, 1.0), g_View.matWorldToClip);
+    float3 worldSpacePositionLastFrame = mul(instance.prevTransform, float4(objectSpacePosition, 1.0)).xyz;
+    float4 clipSpacePositionLastFrame = mul(float4(worldSpacePositionLastFrame, 1.0), g_ViewLastFrame.matWorldToClip);
 
     o_uv = texcoord;
     o_position = clipSpacePosition;
     o_material = geometry.materialIndex;
+    o_positiondelta = (clipSpacePosition - clipSpacePositionLastFrame).xyz;
 }
 
 void ps_main(
     in float4 i_position : SV_Position,
+    in float3 i_delta : PositionDelta,
     in float2 i_uv : TEXCOORD, 
     nointerpolation in uint i_material : MATERIAL, 
     out float4 o_color : SV_Target0)
