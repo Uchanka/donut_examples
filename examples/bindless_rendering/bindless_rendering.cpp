@@ -124,18 +124,6 @@ public:
         
         GetDevice()->waitForIdle();
 
-        nvrhi::BindingSetDesc bindingSetDesc;
-        bindingSetDesc.bindings = {
-            nvrhi::BindingSetItem::ConstantBuffer(0, m_ViewConstants),
-            nvrhi::BindingSetItem::ConstantBuffer(1, m_ViewConstantsLastFrame),
-            nvrhi::BindingSetItem::PushConstants(2, sizeof(int2)),
-            nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_Scene->GetInstanceBuffer()),
-            nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_Scene->GetGeometryBuffer()),
-            nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_Scene->GetMaterialBuffer()),
-            nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler)
-        };
-        nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDesc, m_BindingLayout, m_BindingSet);
-
         return true;
     }
 
@@ -236,6 +224,18 @@ public:
             framebufferDesc.addColorAttachment(m_ColorBuffer, nvrhi::AllSubresources);
             framebufferDesc.setDepthAttachment(m_DepthBuffer);
             m_Framebuffer = GetDevice()->createFramebuffer(framebufferDesc);
+
+            nvrhi::BindingSetDesc bindingSetDesc;
+            bindingSetDesc.bindings = {
+                nvrhi::BindingSetItem::ConstantBuffer(0, m_ViewConstants),
+                nvrhi::BindingSetItem::ConstantBuffer(1, m_ViewConstantsLastFrame),
+                nvrhi::BindingSetItem::PushConstants(2, sizeof(int2)),
+                nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_Scene->GetInstanceBuffer()),
+                nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_Scene->GetGeometryBuffer()),
+                nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_Scene->GetMaterialBuffer()),
+                nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler)
+            };
+            nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDesc, m_BindingLayout, m_BindingSet);
             
             nvrhi::GraphicsPipelineDesc pipelineDesc;
             pipelineDesc.VS = m_VertexShader;
@@ -246,6 +246,7 @@ public:
             pipelineDesc.renderState.depthStencilState.depthFunc = nvrhi::ComparisonFunc::GreaterOrEqual;
             pipelineDesc.renderState.rasterState.frontCounterClockwise = true;
             pipelineDesc.renderState.rasterState.setCullBack();
+
             m_GraphicsPipeline = GetDevice()->createGraphicsPipeline(pipelineDesc, m_Framebuffer);
         }
 
