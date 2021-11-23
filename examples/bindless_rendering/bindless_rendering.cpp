@@ -61,10 +61,12 @@ private:
     
     nvrhi::TextureHandle m_DepthBuffer;
     nvrhi::TextureHandle m_ColorBuffer;
+    nvrhi::TextureHandle m_HistoryBuffer;
     nvrhi::FramebufferHandle m_Framebuffer;
    
     std::shared_ptr<engine::ShaderFactory> m_ShaderFactory;
     std::unique_ptr<engine::Scene> m_Scene;
+    std::unique_ptr<engine::Scene> m_SceneLast;
     std::shared_ptr<engine::DescriptorTableManager> m_DescriptorTableManager;
     std::unique_ptr<engine::BindingCache> m_BindingCache;
 
@@ -115,7 +117,7 @@ public:
         BeginLoadingScene(nativeFS, sceneFileName);
 
         m_Scene->FinishedLoading(GetFrameIndex());
-        
+
         m_Camera.LookAt(float3(0.f, 1.8f, 0.f), float3(1.f, 1.8f, 0.f));
         m_Camera.SetMoveSpeed(3.f);
 
@@ -130,7 +132,7 @@ public:
     bool LoadScene(std::shared_ptr<vfs::IFileSystem> fs, const std::filesystem::path& sceneFileName) override 
     {
         engine::Scene* scene = new engine::Scene(GetDevice(), *m_ShaderFactory, fs, m_TextureCache, m_DescriptorTableManager, nullptr);
-
+        engine::Scene* sceneLast = new engine::Scene(GetDevice(), *m_ShaderFactory, fs, m_TextureCache, m_DescriptorTableManager, nullptr);
         if (scene->Load(sceneFileName))
         {
             m_Scene = std::unique_ptr<engine::Scene>(scene);
@@ -191,6 +193,7 @@ public:
     { 
         m_DepthBuffer = nullptr;
         m_ColorBuffer = nullptr;
+        m_HistoryBuffer = nullptr;
         m_Framebuffer = nullptr;
         m_GraphicsPipeline = nullptr;
         m_BindingCache->Clear();
@@ -220,6 +223,14 @@ public:
             textureDesc.initialState = nvrhi::ResourceStates::DepthWrite;
             m_DepthBuffer = GetDevice()->createTexture(textureDesc);
 
+            textureDesc.clearValue = nvrhi::Color(0.f);
+            textureDesc.isTypeless = false;
+            textureDesc.format = nvrhi::Format::RGBA16_FLOAT;
+            textureDesc.initialState = nvrhi::ResourceStates::RenderTarget;
+            textureDesc.isUAV = true;
+            textureDesc.debugName = "HistoryBuffer";
+            m_HistoryBuffer = GetDevice()->createTexture(textureDesc);
+
             nvrhi::FramebufferDesc framebufferDesc;
             framebufferDesc.addColorAttachment(m_ColorBuffer, nvrhi::AllSubresources);
             framebufferDesc.setDepthAttachment(m_DepthBuffer);
@@ -233,6 +244,7 @@ public:
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_Scene->GetInstanceBuffer()),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_Scene->GetGeometryBuffer()),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_Scene->GetMaterialBuffer()),
+                nvrhi::BindingSetItem::Texture_SRV(3, m_HistoryBuffer),
                 nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler)
             };
             nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDesc, m_BindingLayout, m_BindingSet);
@@ -250,21 +262,28 @@ public:
             m_GraphicsPipeline = GetDevice()->createGraphicsPipeline(pipelineDesc, m_Framebuffer);
         }
 
+        m_CommandList->open();
+        PlanarViewConstants viewConstants;
+        if (GetFrameIndex() != 0)
+        {
+            m_View.FillPlanarViewConstants(viewConstants);
+            m_CommandList->writeBuffer(m_ViewConstantsLastFrame, &viewConstants, sizeof(viewConstants));
+        }
+
         nvrhi::Viewport windowViewport(float(fbinfo.width), float(fbinfo.height));
         m_View.SetViewport(windowViewport);
         m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewport.width() / windowViewport.height(), 0.1f));
         m_View.UpdateCache();
         
-        m_CommandList->open();
-
-        PlanarViewConstants viewConstants;
-        m_View.FillPlanarViewConstants(viewConstants);
-        m_CommandList->writeBuffer(m_ViewConstantsLastFrame, &viewConstants, sizeof(viewConstants));
-
         m_Scene->Refresh(m_CommandList, GetFrameIndex());
 
         m_CommandList->clearDepthStencilTexture(m_DepthBuffer, nvrhi::AllSubresources, true, 0.f, true, 0);
 
+        if (GetFrameIndex() == 0)
+        {
+            m_View.FillPlanarViewConstants(viewConstants);
+            m_CommandList->writeBuffer(m_ViewConstantsLastFrame, &viewConstants, sizeof(viewConstants));
+        }
         m_View.FillPlanarViewConstants(viewConstants);
         m_CommandList->writeBuffer(m_ViewConstants, &viewConstants, sizeof(viewConstants));
 
@@ -290,7 +309,7 @@ public:
                 m_CommandList->draw(args);
             }
         }
-        
+
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
         m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
 

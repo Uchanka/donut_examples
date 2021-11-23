@@ -42,9 +42,11 @@ struct InstanceConstants
 ConstantBuffer<PlanarViewConstants> g_View : register(b0);
 ConstantBuffer<PlanarViewConstants> g_ViewLastFrame : register(b1);
 VK_PUSH_CONSTANT ConstantBuffer<InstanceConstants> g_Instance : register(b2);
+
 StructuredBuffer<InstanceData> t_InstanceData : register(t0);
 StructuredBuffer<GeometryData> t_GeometryData : register(t1);
 StructuredBuffer<MaterialConstants> t_MaterialConstants : register(t2);
+
 SamplerState s_MaterialSampler : register(s0);
 
 VK_BINDING(0, 1) ByteAddressBuffer t_BindlessBuffers[] : register(t0, space1);
@@ -66,25 +68,27 @@ void vs_main(
     uint index = indexBuffer.Load(geometry.indexOffset + i_vertexID * 4);
 
     float2 texcoord = geometry.texCoord1Offset == ~0u ? 0 : asfloat(vertexBuffer.Load2(geometry.texCoord1Offset + index * 8));
-    float3 objectSpacePosition = asfloat(vertexBuffer.Load3(geometry.positionOffset + index * 12));;
+    float3 objectSpacePosition = asfloat(vertexBuffer.Load3(geometry.positionOffset + index * 12));
 
     float3 worldSpacePosition = mul(instance.transform, float4(objectSpacePosition, 1.0)).xyz;
     float4 clipSpacePosition = mul(float4(worldSpacePosition, 1.0), g_View.matWorldToClip);
+
     float3 worldSpacePositionLastFrame = mul(instance.prevTransform, float4(objectSpacePosition, 1.0)).xyz;
     float4 clipSpacePositionLastFrame = mul(float4(worldSpacePositionLastFrame, 1.0), g_ViewLastFrame.matWorldToClip);
 
     o_uv = texcoord;
     o_position = clipSpacePosition;
     o_material = geometry.materialIndex;
-    o_positiondelta = (clipSpacePosition - clipSpacePositionLastFrame).xyz;
+    //o_positiondelta = clipSpacePosition.xyz / clipSpacePosition.w - clipSpacePositionLastFrame.xyz / clipSpacePositionLastFrame.w;
+    o_positiondelta = worldSpacePositionLastFrame - worldSpacePosition;
 }
 
-void ps_main(
+float4 ps_main(
     in float4 i_position : SV_Position,
     in float3 i_delta : PositionDelta,
     in float2 i_uv : TEXCOORD, 
-    nointerpolation in uint i_material : MATERIAL, 
-    out float4 o_color : SV_Target0)
+    nointerpolation in uint i_material : MATERIAL,
+    out float4 motion_vector : SV_Target1) : SV_Target0
 {
     MaterialConstants material = t_MaterialConstants[i_material];
 
@@ -102,5 +106,7 @@ void ps_main(
         diffuse *= diffuseTextureValue.rgb;
     }
 
-    o_color = float4(diffuse.rgb, 1);
+    //float2 fragCoordN = float2(i_position.x / 1280.0, i_position.y / 720.0);
+    motion_vector = float4(i_delta, 1);
+    return float4(abs(i_delta), 1);
 }
