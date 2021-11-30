@@ -90,7 +90,7 @@ void ps_main(
     in float4 i_prev_position : PREV_POSITION,
     in float2 i_uv : TEXCOORD, 
     nointerpolation in uint i_material : MATERIAL,
-    out float4 current_color : SV_Target0,
+    out float4 current_color : SV_Target2,
     out float4 motion_vector : SV_Target1)
 {
     MaterialConstants material = t_MaterialConstants[i_material];

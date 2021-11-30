@@ -33,8 +33,15 @@
 #define VK_BINDING(reg,dset) 
 #endif
 
+struct FrameIndexConstant
+{
+    int frameIndex;
+};
+
+VK_PUSH_CONSTANT ConstantBuffer<FrameIndexConstant> b_FrameIndex : register(b0);
 Texture2D<float4> t_MotionVector : register(t0);
 Texture2D<float4> t_HistoryBuffer : register(t1);
+Texture2D<float4> t_CurrentBuffer : register(t2);
 
 SamplerState s_FrameSampler : register(s0);
 
@@ -51,13 +58,13 @@ static const float2 g_positions[] =
 
 static const float2 g_uvs[] =
 {
-    float2(0.0f, 0.0f),
-    float2(1.0f, 1.0f),
     float2(0.0f, 1.0f),
-
-    float2(0.0f, 0.0f),
     float2(1.0f, 0.0f),
-    float2(1.0f, 1.0f)
+    float2(0.0f, 0.0f),
+
+    float2(0.0f, 1.0f),
+    float2(1.0f, 1.0f),
+    float2(1.0f, 0.0f)
 };
 
 void vs_main_post(
@@ -65,7 +72,7 @@ void vs_main_post(
     out float4 o_position : SV_Position,
     out float2 o_uv_coord : TEXTURE_COORD)
 {
-    o_position = float4(g_positions[i_vertexID], 0.0f, 1.0f);
+    o_position = float4(g_positions[i_vertexID], 1.0f, 1.0f);
     o_uv_coord = g_uvs[i_vertexID];
 }
 
@@ -74,5 +81,20 @@ void ps_main_post(
     in float2 i_uv_coord : TEXTURE_COORD,
     out float4 color_buffer : SV_Target0)
 {
-    color_buffer = t_MotionVector.Sample(s_FrameSampler, i_uv_coord);
+    float4 curr = t_CurrentBuffer.Sample(s_FrameSampler, i_uv_coord);
+    float4 motionVector = t_MotionVector.Sample(s_FrameSampler, i_uv_coord);
+    float2 backtracked_uv_coord = (i_uv_coord - motionVector.xy);
+    float4 prev = t_HistoryBuffer.Sample(s_FrameSampler, backtracked_uv_coord);
+
+    if (b_FrameIndex.frameIndex)
+    {
+        float prevWeight = 0.3f;
+        color_buffer = prev * prevWeight + curr * (1.0f - prevWeight);
+    }
+    else
+    {
+        color_buffer = curr;
+    }
+
+    color_buffer = motionVector;
 }

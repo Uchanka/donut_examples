@@ -62,12 +62,14 @@ private:
     nvrhi::GraphicsPipelineHandle m_GraphicsPipeline;
     nvrhi::GraphicsPipelineHandle m_GraphicsPipelinePost;
 
+    nvrhi::BufferHandle m_FrameIndex;
     nvrhi::BufferHandle m_ViewConstants;
     nvrhi::BufferHandle m_ViewConstantsLastFrame;
     
     nvrhi::TextureHandle m_DepthBuffer;
     nvrhi::TextureHandle m_ColorBuffer;
     nvrhi::TextureHandle m_HistoryBuffer;
+    nvrhi::TextureHandle m_CurrentBuffer;
     nvrhi::TextureHandle m_MotionVector;
     nvrhi::FramebufferHandle m_Framebuffer;
    
@@ -130,6 +132,7 @@ public:
         m_Camera.LookAt(float3(0.f, 1.8f, 0.f), float3(1.f, 1.8f, 0.f));
         m_Camera.SetMoveSpeed(3.f);
 
+        m_FrameIndex = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(int), "FrameIndex", engine::c_MaxRenderPassConstantBufferVersions));
         m_ViewConstants = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstants", engine::c_MaxRenderPassConstantBufferVersions));
         m_ViewConstantsLastFrame = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstantsLastFrame", engine::c_MaxRenderPassConstantBufferVersions));
         
@@ -202,6 +205,7 @@ public:
         m_DepthBuffer = nullptr;
         m_ColorBuffer = nullptr;
         m_HistoryBuffer = nullptr;
+        m_CurrentBuffer = nullptr;
         m_MotionVector = nullptr;
         m_Framebuffer = nullptr;
         m_GraphicsPipeline = nullptr;
@@ -249,10 +253,18 @@ public:
             textureDesc.debugName = "HistoryBuffer";
             m_HistoryBuffer = GetDevice()->createTexture(textureDesc);
 
+            textureDesc.clearValue = nvrhi::Color(0.f);
+            textureDesc.isTypeless = false;
+            textureDesc.format = nvrhi::Format::SRGBA8_UNORM;
+            textureDesc.initialState = nvrhi::ResourceStates::RenderTarget;
+            textureDesc.isUAV = true;
+            textureDesc.debugName = "CurrentBuffer";
+            m_CurrentBuffer = GetDevice()->createTexture(textureDesc);
+
             nvrhi::FramebufferDesc framebufferDesc;
             framebufferDesc.addColorAttachment(m_ColorBuffer, nvrhi::AllSubresources);
             framebufferDesc.addColorAttachment(m_MotionVector, nvrhi::AllSubresources);
-            framebufferDesc.addColorAttachment(m_HistoryBuffer, nvrhi::AllSubresources);
+            framebufferDesc.addColorAttachment(m_CurrentBuffer, nvrhi::AllSubresources);
             framebufferDesc.setDepthAttachment(m_DepthBuffer);
             m_Framebuffer = GetDevice()->createFramebuffer(framebufferDesc);
 
@@ -285,8 +297,10 @@ public:
         {
             nvrhi::BindingSetDesc bindingSetDesc;
             bindingSetDesc.bindings = {
+                nvrhi::BindingSetItem::PushConstants(0, sizeof(int)),
                 nvrhi::BindingSetItem::Texture_SRV(0, m_MotionVector, nvrhi::Format::RGBA16_FLOAT),
                 nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryBuffer, nvrhi::Format::SRGBA8_UNORM),
+                nvrhi::BindingSetItem::Texture_SRV(2, m_CurrentBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler)
             };
             nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDesc, m_BindingLayoutPost, m_BindingSetPost);
@@ -363,6 +377,9 @@ public:
         statePost.bindings = { m_BindingSetPost };
         statePost.viewport = m_View.GetViewportState();
         m_CommandList->setGraphicsState(statePost);
+
+        int frameIndex = GetFrameIndex();
+        m_CommandList->setPushConstants(&frameIndex, sizeof(frameIndex));
 
         nvrhi::DrawArguments argsPost;
         argsPost.vertexCount = 6;
