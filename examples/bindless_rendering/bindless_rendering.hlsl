@@ -90,7 +90,7 @@ void ps_main(
     in float4 i_prev_position : PREV_POSITION,
     in float2 i_uv : TEXCOORD, 
     nointerpolation in uint i_material : MATERIAL,
-    out float4 history_buffer : SV_Target0,
+    out float4 current_color : SV_Target0,
     out float4 motion_vector : SV_Target1)
 {
     MaterialConstants material = t_MaterialConstants[i_material];
@@ -108,8 +108,7 @@ void ps_main(
 
         diffuse *= diffuseTextureValue.rgb;
     }
-
-    //float2 fragCoordN = float2(i_position.x / 1280.0, i_position.y / 720.0);
+    
     motion_vector = float4(i_prev_position.xyz / i_prev_position.w - i_cur_position.xyz / i_cur_position.w, 1.0f);
-    history_buffer = float4(abs(motion_vector));
+    current_color = float4(diffuse, 1.0f);
 }

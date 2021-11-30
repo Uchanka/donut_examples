@@ -33,83 +33,48 @@
 #define VK_BINDING(reg,dset) 
 #endif
 
-struct InstanceConstants
-{
-    uint instance;
-    uint geometryInMesh;
-};
-
-ConstantBuffer<PlanarViewConstants> g_View : register(b0);
-ConstantBuffer<PlanarViewConstants> g_ViewLastFrame : register(b1);
-VK_PUSH_CONSTANT ConstantBuffer<InstanceConstants> g_Instance : register(b2);
-
-StructuredBuffer<InstanceData> t_InstanceData : register(t0);
-StructuredBuffer<GeometryData> t_GeometryData : register(t1);
-StructuredBuffer<MaterialConstants> t_MaterialConstants : register(t2);
+Texture2D t_MotionVector : register(t0);
+Texture2D t_HistoryBuffer : register(t1);
 
 SamplerState s_MaterialSampler : register(s0);
 
-VK_BINDING(0, 1) ByteAddressBuffer t_BindlessBuffers[] : register(t0, space1);
-VK_BINDING(1, 1) Texture2D t_BindlessTextures[] : register(t0, space2);
+static const float2 g_positions[] =
+{
+    float2(-1.0f, -1.0f),
+    float2(1.0f, 1.0f),
+    float2(-1.0f, 1.0f),
+
+    float2(-1.0f, -1.0f),
+    float2(1.0f, -1.0f),
+    float2(1.0f, 1.0f)
+};
+
+static const float2 g_uvs[] =
+{
+    float2(0.0f, 0.0f),
+    float2(1.0f, 1.0f),
+    float2(0.0f, 1.0f),
+
+    float2(0.0f, 0.0f),
+    float2(1.0f, 0.0f),
+    float2(1.0f, 1.0f)
+};
 
 void vs_main_post(
     in uint i_vertexID : SV_VertexID,
     out float4 o_position : SV_Position,
-    out float4 o_cur_position : CUR_POSITION,
-    out float4 o_prev_position : PREV_POSITION,
-    out float2 o_uv : TEXCOORD,
-    out uint o_material : MATERIAL)
+    out float2 o_uv_coord : TEXTURE_COORD)
 {
-    InstanceData instance = t_InstanceData[g_Instance.instance];
-    GeometryData geometry = t_GeometryData[instance.firstGeometryIndex + g_Instance.geometryInMesh];
-
-    ByteAddressBuffer indexBuffer = t_BindlessBuffers[geometry.indexBufferIndex];
-    ByteAddressBuffer vertexBuffer = t_BindlessBuffers[geometry.vertexBufferIndex];
-
-    uint index = indexBuffer.Load(geometry.indexOffset + i_vertexID * 4);
-
-    float2 texcoord = geometry.texCoord1Offset == ~0u ? 0 : asfloat(vertexBuffer.Load2(geometry.texCoord1Offset + index * 8));
-    float3 objectSpacePosition = asfloat(vertexBuffer.Load3(geometry.positionOffset + index * 12));
-
-    float3 worldSpacePosition = mul(instance.transform, float4(objectSpacePosition, 1.0)).xyz;
-    float4 clipSpacePosition = mul(float4(worldSpacePosition, 1.0), g_View.matWorldToClip);
-
-    float3 worldSpacePositionLastFrame = mul(instance.prevTransform, float4(objectSpacePosition, 1.0)).xyz;
-    float4 clipSpacePositionLastFrame = mul(float4(worldSpacePositionLastFrame, 1.0), g_ViewLastFrame.matWorldToClip);
-
-    o_uv = texcoord;
-    o_position = clipSpacePosition;
-    o_cur_position = clipSpacePosition;
-    o_prev_position = clipSpacePositionLastFrame;
-    o_material = geometry.materialIndex;
+    o_position = float4(g_positions[i_vertexID], 0.0f, 1.0f);
+    o_uv_coord = g_uvs[i_vertexID];
 }
 
 void ps_main_post(
     in float4 i_position : SV_Position,
-    in float4 i_cur_position : CUR_POSITION,
-    in float4 i_prev_position : PREV_POSITION,
-    in float2 i_uv : TEXCOORD,
-    nointerpolation in uint i_material : MATERIAL,
+    in float2 i_uv_coord : TEXTURE_COORD,
     out float4 history_buffer : SV_Target0,
-    out float4 motion_vector : SV_Target1)
+    out float4 color_buffer : SV_Target1)
 {
-    MaterialConstants material = t_MaterialConstants[i_material];
-
-    float3 diffuse = material.baseOrDiffuseColor;
-
-    if (material.baseOrDiffuseTextureIndex >= 0)
-    {
-        Texture2D diffuseTexture = t_BindlessTextures[material.baseOrDiffuseTextureIndex];
-
-        float4 diffuseTextureValue = diffuseTexture.Sample(s_MaterialSampler, i_uv);
-
-        if (material.domain == MaterialDomain_AlphaTested)
-            clip(diffuseTextureValue.a - material.alphaCutoff);
-
-        diffuse *= diffuseTextureValue.rgb;
-    }
-
-    //float2 fragCoordN = float2(i_position.x / 1280.0, i_position.y / 720.0);
-    motion_vector = float4(i_prev_position.xyz / i_prev_position.w - i_cur_position.xyz / i_cur_position.w, 1.0f);
-    history_buffer = float4(motion_vector);
+    color_buffer = float4(i_uv_coord, 0, 1);
+    history_buffer = float4(i_uv_coord, 0, 1);
 }
