@@ -238,16 +238,16 @@ public:
             textureDesc.format = nvrhi::Format::RGBA16_FLOAT;
             textureDesc.initialState = nvrhi::ResourceStates::RenderTarget;
             textureDesc.isUAV = true;
-            textureDesc.debugName = "HistoryBuffer";
-            m_HistoryBuffer = GetDevice()->createTexture(textureDesc);
+            textureDesc.debugName = "MotionVector";
+            m_MotionVector = GetDevice()->createTexture(textureDesc);
 
             textureDesc.clearValue = nvrhi::Color(0.f);
             textureDesc.isTypeless = false;
             textureDesc.format = nvrhi::Format::RGBA16_FLOAT;
             textureDesc.initialState = nvrhi::ResourceStates::RenderTarget;
             textureDesc.isUAV = true;
-            textureDesc.debugName = "MotionVector";
-            m_MotionVector = GetDevice()->createTexture(textureDesc);
+            textureDesc.debugName = "HistoryBuffer";
+            m_HistoryBuffer = GetDevice()->createTexture(textureDesc);
 
             nvrhi::FramebufferDesc framebufferDesc;
             framebufferDesc.addColorAttachment(m_ColorBuffer, nvrhi::AllSubresources);
@@ -283,23 +283,14 @@ public:
 
         if (!m_GraphicsPipelinePost)
         {
-            nvrhi::BindingLayoutDesc layoutDesc;
-            layoutDesc.visibility = nvrhi::ShaderType::All;
-            layoutDesc.bindings = {
-                nvrhi::BindingLayoutItem::Texture_SRV(0),
-                //nvrhi::BindingLayoutItem::Texture_SRV(1),
-                nvrhi::BindingLayoutItem::Sampler(0)
-            };
-            m_BindingLayoutPost = GetDevice()->createBindingLayout(layoutDesc);
-
             nvrhi::BindingSetDesc bindingSetDesc;
             bindingSetDesc.bindings = {
                 nvrhi::BindingSetItem::Texture_SRV(0, m_MotionVector, nvrhi::Format::RGBA16_FLOAT),
-                //nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryBuffer, nvrhi::Format::RGBA16_FLOAT),
+                nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryBuffer, nvrhi::Format::RGBA16_FLOAT),
                 nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler)
             };
-            m_BindingSetPost = GetDevice()->createBindingSet(bindingSetDesc, m_BindingLayoutPost);
-            
+            nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDesc, m_BindingLayoutPost, m_BindingSetPost);
+
             nvrhi::GraphicsPipelineDesc pipelineDesc;
             pipelineDesc.VS = m_VertexShaderPost;
             pipelineDesc.PS = m_PixelShaderPost;
@@ -378,6 +369,7 @@ public:
         m_CommandList->draw(argsPost);
 
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
+        m_CommandList->clearTextureFloat(m_MotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
