@@ -33,10 +33,10 @@
 #define VK_BINDING(reg,dset) 
 #endif
 
-Texture2D t_MotionVector : register(t0);
-Texture2D t_HistoryBuffer : register(t1);
+Texture2D<float4> t_MotionVector : register(t0);
+//Texture2D<float4> t_HistoryBuffer : register(t1);
 
-SamplerState s_MaterialSampler : register(s0);
+SamplerState s_FrameSampler : register(s0);
 
 static const float2 g_positions[] =
 {
@@ -72,9 +72,9 @@ void vs_main_post(
 void ps_main_post(
     in float4 i_position : SV_Position,
     in float2 i_uv_coord : TEXTURE_COORD,
-    out float4 history_buffer : SV_Target0,
-    out float4 color_buffer : SV_Target1)
+    out float4 color_buffer : SV_Target0,
+    out float4 history_buffer : SV_Target2)
 {
-    color_buffer = float4(i_uv_coord, 0, 1);
+    color_buffer = t_MotionVector.Sample(s_FrameSampler, i_uv_coord);
     history_buffer = float4(i_uv_coord, 0, 1);
 }
