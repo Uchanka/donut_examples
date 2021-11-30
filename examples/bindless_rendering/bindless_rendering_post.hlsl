@@ -52,7 +52,7 @@ SamplerState s_MaterialSampler : register(s0);
 VK_BINDING(0, 1) ByteAddressBuffer t_BindlessBuffers[] : register(t0, space1);
 VK_BINDING(1, 1) Texture2D t_BindlessTextures[] : register(t0, space2);
 
-void vs_main(
+void vs_main_post(
     in uint i_vertexID : SV_VertexID,
     out float4 o_position : SV_Position,
     out float4 o_cur_position : CUR_POSITION,
@@ -84,11 +84,11 @@ void vs_main(
     o_material = geometry.materialIndex;
 }
 
-void ps_main(
+void ps_main_post(
     in float4 i_position : SV_Position,
     in float4 i_cur_position : CUR_POSITION,
     in float4 i_prev_position : PREV_POSITION,
-    in float2 i_uv : TEXCOORD, 
+    in float2 i_uv : TEXCOORD,
     nointerpolation in uint i_material : MATERIAL,
     out float4 history_buffer : SV_Target0,
     out float4 motion_vector : SV_Target1)
@@ -102,7 +102,7 @@ void ps_main(
         Texture2D diffuseTexture = t_BindlessTextures[material.baseOrDiffuseTextureIndex];
 
         float4 diffuseTextureValue = diffuseTexture.Sample(s_MaterialSampler, i_uv);
-        
+
         if (material.domain == MaterialDomain_AlphaTested)
             clip(diffuseTextureValue.a - material.alphaCutoff);
 
@@ -111,5 +111,5 @@ void ps_main(
 
     //float2 fragCoordN = float2(i_position.x / 1280.0, i_position.y / 720.0);
     motion_vector = float4(i_prev_position.xyz / i_prev_position.w - i_cur_position.xyz / i_cur_position.w, 1.0f);
-    history_buffer = float4(abs(motion_vector));
+    history_buffer = float4(motion_vector);
 }

@@ -54,7 +54,10 @@ private:
     nvrhi::BindingSetHandle m_BindingSet;
     nvrhi::ShaderHandle m_VertexShader;
     nvrhi::ShaderHandle m_PixelShader;
+    nvrhi::ShaderHandle m_VertexShaderPost;
+    nvrhi::ShaderHandle m_PixelShaderPost;
     nvrhi::GraphicsPipelineHandle m_GraphicsPipeline;
+    nvrhi::GraphicsPipelineHandle m_GraphicsPipelinePost;
 
     nvrhi::BufferHandle m_ViewConstants;
     nvrhi::BufferHandle m_ViewConstantsLastFrame;
@@ -95,6 +98,8 @@ public:
 
         m_VertexShader = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering.hlsl", "vs_main", nullptr, nvrhi::ShaderType::Vertex);
         m_PixelShader = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering.hlsl", "ps_main", nullptr, nvrhi::ShaderType::Pixel);
+        m_VertexShaderPost = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering_post.hlsl", "vs_main_post", nullptr, nvrhi::ShaderType::Vertex);
+        m_PixelShaderPost = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering_post.hlsl", "ps_main_post", nullptr, nvrhi::ShaderType::Pixel);
 
         nvrhi::BindlessLayoutDesc bindlessLayoutDesc;
         bindlessLayoutDesc.visibility = nvrhi::ShaderType::All;
@@ -262,6 +267,19 @@ public:
             m_GraphicsPipeline = GetDevice()->createGraphicsPipeline(pipelineDesc, m_Framebuffer);
         }
 
+        if (!m_GraphicsPipelinePost)
+        {
+            nvrhi::BindingSetDesc bindingSetDesc;
+            bindingSetDesc.bindings = {
+                nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_Scene->GetInstanceBuffer()),
+                nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_Scene->GetGeometryBuffer()),
+                nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_Scene->GetMaterialBuffer()),
+                nvrhi::BindingSetItem::Texture_SRV(3, m_HistoryBuffer),
+                nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler)
+            };
+            nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDesc, m_BindingLayout, m_BindingSet);
+        }
+
         m_CommandList->open();
         PlanarViewConstants viewConstants;
         if (GetFrameIndex() != 0)
@@ -338,6 +356,7 @@ int main(int __argc, const char** __argv)
     deviceParams.enableDebugRuntime = true; 
     deviceParams.enableNvrhiValidationLayer = true;
 #endif
+    deviceParams.vsyncEnabled = true;
 
     if (!deviceManager->CreateWindowDeviceAndSwapChain(deviceParams, g_WindowTitle))
     {
