@@ -309,7 +309,7 @@ public:
                 nvrhi::BindingSetItem::Texture_SRV(0, m_MotionVector, nvrhi::Format::RG16_FLOAT),
                 nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(2, m_DitheredCurrentBuffer, nvrhi::Format::SRGBA8_UNORM),
-                nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler)
+                nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
             };
             nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescPost, m_BindingLayoutPost, m_BindingSetPost);
 
@@ -319,8 +319,8 @@ public:
             pipelineDescPost.primType = nvrhi::PrimitiveType::TriangleList;
             pipelineDescPost.bindingLayouts = { m_BindingLayoutPost };
             pipelineDescPost.renderState.depthStencilState.depthTestEnable = false;
-            pipelineDescPost.renderState.rasterState.frontCounterClockwise = true;
-            pipelineDescPost.renderState.rasterState.setCullBack();
+            pipelineDescPost.renderState.depthStencilState.stencilEnable = false;
+            pipelineDescPost.renderState.rasterState.setCullNone();
 
             m_GraphicsPipelinePost = GetDevice()->createGraphicsPipeline(pipelineDescPost, m_Framebuffer);
         }

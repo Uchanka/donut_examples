@@ -47,24 +47,24 @@ SamplerState s_FrameSampler : register(s0);
 
 static const float2 g_positions[] =
 {
-    float2(-1.0f, -1.0f),
-    float2(1.0f, 1.0f),
     float2(-1.0f, 1.0f),
-
+    float2(1.0f, 1.0f),
     float2(-1.0f, -1.0f),
-    float2(1.0f, -1.0f),
-    float2(1.0f, 1.0f)
+
+    float2(1.0f, 1.0f),
+    float2(-1.0f, -1.0f),
+    float2(1.0f, -1.0f)
 };
 
 static const float2 g_uvs[] =
 {
-    float2(0.0f, 1.0f),
-    float2(1.0f, 0.0f),
     float2(0.0f, 0.0f),
-
+    float2(1.0f, 0.0f),
     float2(0.0f, 1.0f),
-    float2(1.0f, 1.0f),
-    float2(1.0f, 0.0f)
+
+    float2(1.0f, 0.0f),
+    float2(0.0f, 1.0f),
+    float2(1.0f, 1.0f)
 };
 
 void vs_main_post(
@@ -98,5 +98,5 @@ void ps_main_post(
         blended_curr = curr;
     }
     current_buffer = blended_curr;
-    color_buffer = float4(motionVector, 0, 1);
+    color_buffer = blended_curr;
 }
