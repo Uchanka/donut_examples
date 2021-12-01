@@ -90,8 +90,8 @@ void ps_main(
     in float4 i_prev_position : PREV_POSITION,
     in float2 i_uv : TEXCOORD, 
     nointerpolation in uint i_material : MATERIAL,
-    out float4 current_color : SV_Target2,
-    out float4 motion_vector : SV_Target1)
+    out float2 motion_vector : SV_Target1,
+    out float4 dithered_current : SV_Target2)
 {
     MaterialConstants material = t_MaterialConstants[i_material];
 
@@ -109,6 +109,6 @@ void ps_main(
         diffuse *= diffuseTextureValue.rgb;
     }
     
-    motion_vector = float4(i_prev_position.xyz / i_prev_position.w - i_cur_position.xyz / i_cur_position.w, 1.0f);
-    current_color = float4(diffuse, 1.0f);
+    motion_vector = float2(i_cur_position.xy / i_cur_position.w - i_prev_position.xy / i_prev_position.w);
+    dithered_current = float4(diffuse, 1.0f);
 }
