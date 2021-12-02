@@ -49,27 +49,20 @@ private:
 	std::shared_ptr<vfs::RootFileSystem> m_RootFS;
 
     nvrhi::CommandListHandle m_CommandList;
-
-    nvrhi::BindingLayoutHandle m_BindingLayoutMotion;
+    nvrhi::CommandListHandle m_CommandListPost;
     nvrhi::BindingLayoutHandle m_BindingLayout;
-    nvrhi::BindingLayoutHandle m_BindingLayoutBlend;
+    nvrhi::BindingLayoutHandle m_BindingLayoutPost;
     nvrhi::BindingLayoutHandle m_BindlessLayout;
-
-    nvrhi::BindingSetHandle m_BindingSetMotion;
     nvrhi::BindingSetHandle m_BindingSet;
-    nvrhi::BindingSetHandle m_BindingSetBlend;
-
-    nvrhi::ShaderHandle m_VertexShaderMotion;
-    nvrhi::ShaderHandle m_PixelShaderMotion;
+    nvrhi::BindingSetHandle m_BindingSetPost;
     nvrhi::ShaderHandle m_VertexShader;
     nvrhi::ShaderHandle m_PixelShader;
-    nvrhi::ShaderHandle m_VertexShaderBlend;
-    nvrhi::ShaderHandle m_PixelShaderBlend;
-
-    nvrhi::GraphicsPipelineHandle m_GraphicsPipelineMotion;
+    nvrhi::ShaderHandle m_VertexShaderPost;
+    nvrhi::ShaderHandle m_PixelShaderPost;
     nvrhi::GraphicsPipelineHandle m_GraphicsPipeline;
-    nvrhi::GraphicsPipelineHandle m_GraphicsPipelineBlend;
+    nvrhi::GraphicsPipelineHandle m_GraphicsPipelinePost;
 
+    nvrhi::BufferHandle m_FrameIndex;
     nvrhi::BufferHandle m_ViewConstants;
     nvrhi::BufferHandle m_ViewConstantsLastFrame;
     
@@ -109,12 +102,10 @@ public:
 		m_CommonPasses = std::make_shared<engine::CommonRenderPasses>(GetDevice(), m_ShaderFactory);
         m_BindingCache = std::make_unique<engine::BindingCache>(GetDevice());
 
-        m_VertexShaderMotion = m_ShaderFactory->CreateShader("/shaders/app/motion_vector.hlsl", "vs_main_motion", nullptr, nvrhi::ShaderType::Vertex);
-        m_PixelShaderMotion = m_ShaderFactory->CreateShader("/shaders/app/motion_vector.hlsl", "ps_main_motion", nullptr, nvrhi::ShaderType::Pixel);
         m_VertexShader = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering.hlsl", "vs_main", nullptr, nvrhi::ShaderType::Vertex);
         m_PixelShader = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering.hlsl", "ps_main", nullptr, nvrhi::ShaderType::Pixel);
-        m_VertexShaderBlend = m_ShaderFactory->CreateShader("/shaders/app/taa_blending.hlsl", "vs_main_blending", nullptr, nvrhi::ShaderType::Vertex);
-        m_PixelShaderBlend = m_ShaderFactory->CreateShader("/shaders/app/taa_blending.hlsl", "ps_main_blending", nullptr, nvrhi::ShaderType::Pixel);
+        m_VertexShaderPost = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering_post.hlsl", "vs_main_post", nullptr, nvrhi::ShaderType::Vertex);
+        m_PixelShaderPost = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering_post.hlsl", "ps_main_post", nullptr, nvrhi::ShaderType::Pixel);
 
         nvrhi::BindlessLayoutDesc bindlessLayoutDesc;
         bindlessLayoutDesc.visibility = nvrhi::ShaderType::All;
@@ -132,6 +123,7 @@ public:
         m_TextureCache = std::make_shared<engine::TextureCache>(GetDevice(), nativeFS, m_DescriptorTableManager);
 
         m_CommandList = GetDevice()->createCommandList();
+        m_CommandListPost = GetDevice()->createCommandList();
         
         SetAsynchronousLoadingEnabled(false);
         BeginLoadingScene(nativeFS, sceneFileName);
@@ -141,6 +133,7 @@ public:
         m_Camera.LookAt(float3(0.f, 1.8f, 0.f), float3(1.f, 1.8f, 0.f));
         m_Camera.SetMoveSpeed(3.f);
 
+        m_FrameIndex = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(int), "FrameIndex", engine::c_MaxRenderPassConstantBufferVersions));
         m_ViewConstants = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstants", engine::c_MaxRenderPassConstantBufferVersions));
         m_ViewConstantsLastFrame = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstantsLastFrame", engine::c_MaxRenderPassConstantBufferVersions));
         
@@ -218,8 +211,7 @@ public:
         m_MotionVector = nullptr;
         m_Framebuffer = nullptr;
         m_GraphicsPipeline = nullptr;
-        m_GraphicsPipelineMotion = nullptr;
-        m_GraphicsPipelineBlend = nullptr;
+        m_GraphicsPipelinePost = nullptr;
         m_BindingCache->Clear();
     }
 
@@ -227,7 +219,7 @@ public:
     {
         const auto& fbinfo = framebuffer->getFramebufferInfo();
 
-        if (!m_GraphicsPipeline || !m_GraphicsPipelineBlend || !m_GraphicsPipelineMotion)
+        if (!m_GraphicsPipeline || !m_GraphicsPipelinePost)
         {
             nvrhi::TextureDesc textureDesc;
             textureDesc.format = nvrhi::Format::SRGBA8_UNORM;
@@ -287,27 +279,11 @@ public:
             framebufferDesc.setDepthAttachment(m_DepthBuffer);
             m_Framebuffer = GetDevice()->createFramebuffer(framebufferDesc);
 
-            nvrhi::BindingSetDesc bindingSetDescMotion;
-            bindingSetDescMotion.bindings = {
-                nvrhi::BindingSetItem::ConstantBuffer(0, m_ViewConstants),
-                nvrhi::BindingSetItem::ConstantBuffer(1, m_ViewConstantsLastFrame)
-            };
-            nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescMotion, m_BindingLayoutMotion, m_BindingSetMotion);
-
-            nvrhi::GraphicsPipelineDesc pipelineDescMotion;
-            pipelineDescMotion.VS = m_VertexShaderMotion;
-            pipelineDescMotion.PS = m_PixelShaderMotion;
-            pipelineDescMotion.primType = nvrhi::PrimitiveType::TriangleList;
-            pipelineDescMotion.bindingLayouts = { m_BindingLayoutMotion };
-            pipelineDescMotion.renderState.depthStencilState.depthTestEnable = false;
-            pipelineDescMotion.renderState.depthStencilState.stencilEnable = false;
-            pipelineDescMotion.renderState.rasterState.setCullNone();
-            m_GraphicsPipelineMotion = GetDevice()->createGraphicsPipeline(pipelineDescMotion, m_Framebuffer);
-
             nvrhi::BindingSetDesc bindingSetDesc;
             bindingSetDesc.bindings = {
                 nvrhi::BindingSetItem::ConstantBuffer(0, m_ViewConstants),
-                nvrhi::BindingSetItem::PushConstants(1, sizeof(int2)),
+                nvrhi::BindingSetItem::ConstantBuffer(1, m_ViewConstantsLastFrame),
+                nvrhi::BindingSetItem::PushConstants(2, sizeof(int2)),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_Scene->GetInstanceBuffer()),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_Scene->GetGeometryBuffer()),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_Scene->GetMaterialBuffer()),
@@ -324,28 +300,29 @@ public:
             pipelineDesc.renderState.depthStencilState.depthFunc = nvrhi::ComparisonFunc::GreaterOrEqual;
             pipelineDesc.renderState.rasterState.frontCounterClockwise = true;
             pipelineDesc.renderState.rasterState.setCullBack();
+
             m_GraphicsPipeline = GetDevice()->createGraphicsPipeline(pipelineDesc, m_Framebuffer);
 
-            nvrhi::BindingSetDesc bindingSetDescBlend;
-            bindingSetDescBlend.bindings = {
-                nvrhi::BindingSetItem::ConstantBuffer(0, m_ViewConstants),
-                nvrhi::BindingSetItem::PushConstants(1, sizeof(int)),
+            nvrhi::BindingSetDesc bindingSetDescPost;
+            bindingSetDescPost.bindings = {
+                nvrhi::BindingSetItem::PushConstants(0, sizeof(int)),
                 nvrhi::BindingSetItem::Texture_SRV(0, m_MotionVector, nvrhi::Format::RG16_FLOAT),
                 nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(2, m_DitheredCurrentBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
             };
-            nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescBlend, m_BindingLayoutBlend, m_BindingSetBlend);
+            nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescPost, m_BindingLayoutPost, m_BindingSetPost);
 
-            nvrhi::GraphicsPipelineDesc pipelineDescBlend;
-            pipelineDescBlend.VS = m_VertexShaderBlend;
-            pipelineDescBlend.PS = m_PixelShaderBlend;
-            pipelineDescBlend.primType = nvrhi::PrimitiveType::TriangleList;
-            pipelineDescBlend.bindingLayouts = { m_BindingLayoutBlend };
-            pipelineDescBlend.renderState.depthStencilState.depthTestEnable = false;
-            pipelineDescBlend.renderState.depthStencilState.stencilEnable = false;
-            pipelineDescBlend.renderState.rasterState.setCullNone();
-            m_GraphicsPipelineBlend = GetDevice()->createGraphicsPipeline(pipelineDescBlend, m_Framebuffer);
+            nvrhi::GraphicsPipelineDesc pipelineDescPost;
+            pipelineDescPost.VS = m_VertexShaderPost;
+            pipelineDescPost.PS = m_PixelShaderPost;
+            pipelineDescPost.primType = nvrhi::PrimitiveType::TriangleList;
+            pipelineDescPost.bindingLayouts = { m_BindingLayoutPost };
+            pipelineDescPost.renderState.depthStencilState.depthTestEnable = false;
+            pipelineDescPost.renderState.depthStencilState.stencilEnable = false;
+            pipelineDescPost.renderState.rasterState.setCullNone();
+
+            m_GraphicsPipelinePost = GetDevice()->createGraphicsPipeline(pipelineDescPost, m_Framebuffer);
         }
 
         m_CommandList->open();
@@ -370,25 +347,7 @@ public:
             m_View.FillPlanarViewConstants(viewConstants);
             m_CommandList->writeBuffer(m_ViewConstantsLastFrame, &viewConstants, sizeof(viewConstants));
         }
-
         m_View.FillPlanarViewConstants(viewConstants);
-        m_CommandList->writeBuffer(m_ViewConstants, &viewConstants, sizeof(viewConstants));
-
-        nvrhi::GraphicsState stateMotion;
-        stateMotion.pipeline = m_GraphicsPipelineMotion;
-        stateMotion.framebuffer = m_Framebuffer;
-        stateMotion.bindings = { m_BindingSetMotion };
-        stateMotion.viewport = m_View.GetViewportState();
-        m_CommandList->setGraphicsState(stateMotion);
-
-        nvrhi::DrawArguments argsMotion;
-        argsMotion.vertexCount = 6;
-        m_CommandList->draw(argsMotion);
-
-        m_CommandList->close();
-        GetDevice()->executeCommandList(m_CommandList);
-
-        m_CommandList->open();
         m_CommandList->writeBuffer(m_ViewConstants, &viewConstants, sizeof(viewConstants));
 
         nvrhi::GraphicsState state;
@@ -418,21 +377,20 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
 
         m_CommandList->open();
-        m_CommandList->writeBuffer(m_ViewConstants, &viewConstants, sizeof(viewConstants));
-
-        nvrhi::GraphicsState stateBlend;
-        stateBlend.pipeline = m_GraphicsPipelineBlend;
-        stateBlend.framebuffer = m_Framebuffer;
-        stateBlend.bindings = { m_BindingSetBlend };
-        stateBlend.viewport = m_View.GetViewportState();
-        m_CommandList->setGraphicsState(stateBlend);
+        
+        nvrhi::GraphicsState statePost;
+        statePost.pipeline = m_GraphicsPipelinePost;
+        statePost.framebuffer = m_Framebuffer;
+        statePost.bindings = { m_BindingSetPost };
+        statePost.viewport = m_View.GetViewportState();
+        m_CommandList->setGraphicsState(statePost);
 
         int frameIndex = GetFrameIndex();
         m_CommandList->setPushConstants(&frameIndex, sizeof(frameIndex));
 
-        nvrhi::DrawArguments argsBlend;
-        argsBlend.vertexCount = 6;
-        m_CommandList->draw(argsBlend);
+        nvrhi::DrawArguments argsPost;
+        argsPost.vertexCount = 6;
+        m_CommandList->draw(argsPost);
         m_CommandList->copyTexture(m_HistoryBuffer, nvrhi::TextureSlice(), m_BlendedCurrentBuffer, nvrhi::TextureSlice());
 
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
