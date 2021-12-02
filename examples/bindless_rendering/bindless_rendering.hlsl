@@ -40,8 +40,7 @@ struct InstanceConstants
 };
 
 ConstantBuffer<PlanarViewConstants> g_View : register(b0);
-ConstantBuffer<PlanarViewConstants> g_ViewLastFrame : register(b1);
-VK_PUSH_CONSTANT ConstantBuffer<InstanceConstants> g_Instance : register(b2);
+VK_PUSH_CONSTANT ConstantBuffer<InstanceConstants> g_Instance : register(b1);
 
 StructuredBuffer<InstanceData> t_InstanceData : register(t0);
 StructuredBuffer<GeometryData> t_GeometryData : register(t1);
@@ -55,8 +54,6 @@ VK_BINDING(1, 1) Texture2D t_BindlessTextures[] : register(t0, space2);
 void vs_main(
     in uint i_vertexID : SV_VertexID,
     out float4 o_position : SV_Position,
-    out float4 o_cur_position : CUR_POSITION,
-    out float4 o_prev_position : PREV_POSITION,
     out float2 o_uv : TEXCOORD,
     out uint o_material : MATERIAL)
 {
@@ -74,23 +71,15 @@ void vs_main(
     float3 worldSpacePosition = mul(instance.transform, float4(objectSpacePosition, 1.0)).xyz;
     float4 clipSpacePosition = mul(float4(worldSpacePosition, 1.0), g_View.matWorldToClip);
 
-    float3 worldSpacePositionLastFrame = mul(instance.prevTransform, float4(objectSpacePosition, 1.0)).xyz;
-    float4 clipSpacePositionLastFrame = mul(float4(worldSpacePositionLastFrame, 1.0), g_ViewLastFrame.matWorldToClip);
-
     o_uv = texcoord;
     o_position = clipSpacePosition;
-    o_cur_position = clipSpacePosition;
-    o_prev_position = clipSpacePositionLastFrame;
     o_material = geometry.materialIndex;
 }
 
 void ps_main(
     in float4 i_position : SV_Position,
-    in float4 i_cur_position : CUR_POSITION,
-    in float4 i_prev_position : PREV_POSITION,
     in float2 i_uv : TEXCOORD, 
     nointerpolation in uint i_material : MATERIAL,
-    out float2 motion_vector : SV_Target1,
     out float4 dithered_current : SV_Target2)
 {
     MaterialConstants material = t_MaterialConstants[i_material];
@@ -108,7 +97,6 @@ void ps_main(
 
         diffuse *= diffuseTextureValue.rgb;
     }
-    
-    motion_vector = float2(i_cur_position.xy / i_cur_position.w - i_prev_position.xy / i_prev_position.w);
+
     dithered_current = float4(diffuse, 1.0f);
 }

@@ -38,7 +38,9 @@ struct FrameIndexConstant
     int frameIndex;
 };
 
-VK_PUSH_CONSTANT ConstantBuffer<FrameIndexConstant> b_FrameIndex : register(b0);
+ConstantBuffer<PlanarViewConstants> g_View : register(b0);
+VK_PUSH_CONSTANT ConstantBuffer<FrameIndexConstant> b_FrameIndex : register(b1);
+
 Texture2D<float2> t_MotionVector : register(t0);
 Texture2D<float4> t_HistoryBuffer : register(t1);
 Texture2D<float4> t_DitheredCurrentBuffer : register(t2);
@@ -67,7 +69,7 @@ static const float2 g_uvs[] =
     float2(1.0f, 1.0f)
 };
 
-void vs_main_post(
+void vs_main_blending(
     in uint i_vertexID : SV_VertexID,
     out float4 o_position : SV_Position,
     out float2 o_uv_coord : TEXTURE_COORD)
@@ -76,26 +78,26 @@ void vs_main_post(
     o_uv_coord = g_uvs[i_vertexID];
 }
 
-void ps_main_post(
+void ps_main_blending(
     in float4 i_position : SV_Position,
     in float2 i_uv_coord : TEXTURE_COORD,
     out float4 color_buffer : SV_Target0,
     out float4 current_buffer : SV_Target3)
 {
-    float4 curr = t_DitheredCurrentBuffer.Sample(s_FrameSampler, i_uv_coord);
-    float2 motionVector = t_MotionVector.Sample(s_FrameSampler, i_uv_coord);
-    float2 backtracked_uv_coord = (i_uv_coord - motionVector.xy);
-    float4 prev = t_HistoryBuffer.Sample(s_FrameSampler, backtracked_uv_coord);
+    float4 curr = t_DitheredCurrentBuffer[i_position.xy];
+    float2 motionVector = t_MotionVector[i_position.xy];
+    float2 backtracked_position = (i_position.xy - motionVector);
+    float4 prev = t_HistoryBuffer.Sample(s_FrameSampler, backtracked_position / g_View.viewportSize);
     
     float4 blended_curr = float4(0.0f, 0.0f, 0.0f, 0.0f);
-    if (b_FrameIndex.frameIndex)
-    {
-        float prevWeight = 0.3f;
-        blended_curr = prev * prevWeight + curr * (1.0f - prevWeight);
-    }
-    else
+    if (b_FrameIndex.frameIndex == 0)
     {
         blended_curr = curr;
+    }
+    else
+    {   
+        float prevWeight = 0.3f;
+        blended_curr = prev * prevWeight + curr * (1.0f - prevWeight);
     }
     current_buffer = blended_curr;
     color_buffer = blended_curr;
