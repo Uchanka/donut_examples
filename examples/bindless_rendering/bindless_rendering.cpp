@@ -83,6 +83,7 @@ private:
     engine::PlanarView m_View;
     
     bool m_EnableAnimations = true;
+    bool m_EnableTAA = true;
     float m_WallclockTime = 0.f;
 
 public:
@@ -161,6 +162,11 @@ public:
         if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
         {
             m_EnableAnimations = !m_EnableAnimations;
+            return true;
+        }
+        if (key == GLFW_KEY_T && action == GLFW_PRESS)
+        {
+            m_EnableTAA = !m_EnableTAA;
             return true;
         }
 
@@ -326,7 +332,7 @@ public:
             nvrhi::BindingSetDesc bindingSetDescPost;
             bindingSetDescPost.bindings = {
                 nvrhi::BindingSetItem::ConstantBuffer(0, m_ViewConstants),
-                nvrhi::BindingSetItem::PushConstants(1, sizeof(int)),
+                nvrhi::BindingSetItem::PushConstants(1, sizeof(int2)),
                 nvrhi::BindingSetItem::Texture_SRV(0, m_MotionVector, nvrhi::Format::RG16_FLOAT),
                 nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(2, m_DitheredCurrentBuffer, nvrhi::Format::SRGBA8_UNORM),
@@ -408,7 +414,7 @@ public:
         statePost.viewport = m_View.GetViewportState();
         m_CommandList->setGraphicsState(statePost);
 
-        int frameIndex = GetFrameIndex();
+        int2 frameIndex = int2(GetFrameIndex(), m_EnableTAA ? 1 : 0);
         m_CommandList->setPushConstants(&frameIndex, sizeof(frameIndex));
 
         nvrhi::DrawArguments argsPost;

@@ -36,6 +36,7 @@
 struct FrameIndexConstant
 {
     int frameIndex;
+    int taaEnabled;
 };
 
 ConstantBuffer<PlanarViewConstants> g_View : register(b0);
@@ -90,9 +91,9 @@ void ps_main_post(
     float4 prev = t_HistoryBuffer.Sample(s_FrameSampler, backtracked_uv_coord);
     
     float4 blended_curr = float4(0.0f, 0.0f, 0.0f, 0.0f);
-    if (b_FrameIndex.frameIndex)
+    if (b_FrameIndex.frameIndex && b_FrameIndex.taaEnabled)
     {
-        float prevWeight = 0.25f;
+        float prevWeight = 0.3f;
         blended_curr = prev * prevWeight + curr * (1.0f - prevWeight);
     }
     else
