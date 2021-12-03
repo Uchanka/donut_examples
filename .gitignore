@@ -2,4 +2,3 @@ bin/
 build*/
 .vs
 nvapi/
-donut

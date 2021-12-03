@@ -102,5 +102,5 @@ void ps_main_post(
     }
     current_buffer = blended_curr;
     color_buffer = blended_curr;
-    //color_buffer = float4(motionVector, 0.0, 1.0);
+    color_buffer = float4(motionVector / g_View.viewportSize, 0.0, 1.0);
 }
