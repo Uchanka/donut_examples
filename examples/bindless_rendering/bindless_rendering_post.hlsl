@@ -38,7 +38,8 @@ struct FrameIndexConstant
     int frameIndex;
 };
 
-VK_PUSH_CONSTANT ConstantBuffer<FrameIndexConstant> b_FrameIndex : register(b0);
+ConstantBuffer<PlanarViewConstants> g_View : register(b0);
+VK_PUSH_CONSTANT ConstantBuffer<FrameIndexConstant> b_FrameIndex : register(b1);
 Texture2D<float2> t_MotionVector : register(t0);
 Texture2D<float4> t_HistoryBuffer : register(t1);
 Texture2D<float4> t_DitheredCurrentBuffer : register(t2);
@@ -82,15 +83,16 @@ void ps_main_post(
     out float4 color_buffer : SV_Target0,
     out float4 current_buffer : SV_Target3)
 {
-    float4 curr = t_DitheredCurrentBuffer.Sample(s_FrameSampler, i_uv_coord);
-    float2 motionVector = t_MotionVector.Sample(s_FrameSampler, i_uv_coord);
-    float2 backtracked_uv_coord = (i_uv_coord - motionVector.xy);
+    float4 curr = t_DitheredCurrentBuffer[i_position.xy];
+    float2 motionVector = t_MotionVector[i_position.xy];
+    float2 backtracked_position_screen = (i_position.xy - motionVector.xy);
+    float2 backtracked_uv_coord = backtracked_position_screen / g_View.viewportSize;
     float4 prev = t_HistoryBuffer.Sample(s_FrameSampler, backtracked_uv_coord);
     
     float4 blended_curr = float4(0.0f, 0.0f, 0.0f, 0.0f);
     if (b_FrameIndex.frameIndex)
     {
-        float prevWeight = 0.3f;
+        float prevWeight = 0.25f;
         blended_curr = prev * prevWeight + curr * (1.0f - prevWeight);
     }
     else
@@ -99,4 +101,5 @@ void ps_main_post(
     }
     current_buffer = blended_curr;
     color_buffer = blended_curr;
+    //color_buffer = float4(motionVector, 0.0, 1.0);
 }

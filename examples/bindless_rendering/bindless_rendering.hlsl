@@ -55,7 +55,7 @@ VK_BINDING(1, 1) Texture2D t_BindlessTextures[] : register(t0, space2);
 void vs_main(
     in uint i_vertexID : SV_VertexID,
     out float4 o_position : SV_Position,
-    out float4 o_cur_position : CUR_POSITION,
+    out float4 o_curr_position : CURR_POSITION,
     out float4 o_prev_position : PREV_POSITION,
     out float2 o_uv : TEXCOORD,
     out uint o_material : MATERIAL)
@@ -73,20 +73,21 @@ void vs_main(
 
     float3 worldSpacePosition = mul(instance.transform, float4(objectSpacePosition, 1.0)).xyz;
     float4 clipSpacePosition = mul(float4(worldSpacePosition, 1.0), g_View.matWorldToClip);
+    float4 clipSpacePositionNoOffset = mul(float4(worldSpacePosition, 1.0), g_View.matWorldToClipNoOffset);
 
     float3 worldSpacePositionLastFrame = mul(instance.prevTransform, float4(objectSpacePosition, 1.0)).xyz;
-    float4 clipSpacePositionLastFrame = mul(float4(worldSpacePositionLastFrame, 1.0), g_ViewLastFrame.matWorldToClip);
+    float4 clipSpacePositionNoOffsetLastFrame = mul(float4(worldSpacePositionLastFrame, 1.0), g_ViewLastFrame.matWorldToClipNoOffset);
 
     o_uv = texcoord;
     o_position = clipSpacePosition;
-    o_cur_position = clipSpacePosition;
-    o_prev_position = clipSpacePositionLastFrame;
+    o_curr_position = clipSpacePositionNoOffset;
+    o_prev_position = clipSpacePositionNoOffsetLastFrame;
     o_material = geometry.materialIndex;
 }
 
 void ps_main(
     in float4 i_position : SV_Position,
-    in float4 i_cur_position : CUR_POSITION,
+    in float4 i_curr_position : CURR_POSITION,
     in float4 i_prev_position : PREV_POSITION,
     in float2 i_uv : TEXCOORD, 
     nointerpolation in uint i_material : MATERIAL,
@@ -109,6 +110,12 @@ void ps_main(
         diffuse *= diffuseTextureValue.rgb;
     }
     
-    motion_vector = float2(i_cur_position.xy / i_cur_position.w - i_prev_position.xy / i_prev_position.w);
+    float2 prev_position_clip = i_prev_position.xy / i_prev_position.w;
+    float2 prev_position_screen = float2(prev_position_clip.x * 0.5f + 0.5f, 0.5f - prev_position_clip.y * 0.5f);
+    
+    float2 curr_position_clip = i_curr_position.xy / i_curr_position.w;
+    float2 curr_position_screen = float2(curr_position_clip.x * 0.5f + 0.5f, 0.5f - curr_position_clip.y * 0.5f);
+    motion_vector = (curr_position_screen - prev_position_screen) * g_View.viewportSize;
+
     dithered_current = float4(diffuse, 1.0f);
 }

@@ -215,6 +215,26 @@ public:
         m_BindingCache->Clear();
     }
 
+    float VanDerCorputSequence(int n, int base)
+    {
+        float q = 0, bk = (float) 1 / base;
+
+        while (n > 0)
+        {
+            q += (n % base) * bk;
+            n /= base;
+            bk /= base;
+        }
+
+        return q;
+    }
+
+    float2 GetCurrentFramePixelOffset(const int frameIndex)
+    {
+        int clampedIndex = frameIndex % 16 + 1;
+        return float2(VanDerCorputSequence(clampedIndex, 2), VanDerCorputSequence(clampedIndex, 3));
+    }
+
     void Render(nvrhi::IFramebuffer* framebuffer) override
     {
         const auto& fbinfo = framebuffer->getFramebufferInfo();
@@ -305,7 +325,8 @@ public:
 
             nvrhi::BindingSetDesc bindingSetDescPost;
             bindingSetDescPost.bindings = {
-                nvrhi::BindingSetItem::PushConstants(0, sizeof(int)),
+                nvrhi::BindingSetItem::ConstantBuffer(0, m_ViewConstants),
+                nvrhi::BindingSetItem::PushConstants(1, sizeof(int)),
                 nvrhi::BindingSetItem::Texture_SRV(0, m_MotionVector, nvrhi::Format::RG16_FLOAT),
                 nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(2, m_DitheredCurrentBuffer, nvrhi::Format::SRGBA8_UNORM),
@@ -333,6 +354,7 @@ public:
             m_CommandList->writeBuffer(m_ViewConstantsLastFrame, &viewConstants, sizeof(viewConstants));
         }
 
+        m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
         nvrhi::Viewport windowViewport(float(fbinfo.width), float(fbinfo.height));
         m_View.SetViewport(windowViewport);
         m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewport.width() / windowViewport.height(), 0.1f));
@@ -377,7 +399,8 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
 
         m_CommandList->open();
-        
+        m_CommandList->writeBuffer(m_ViewConstants, &viewConstants, sizeof(viewConstants));
+
         nvrhi::GraphicsState statePost;
         statePost.pipeline = m_GraphicsPipelinePost;
         statePost.framebuffer = m_Framebuffer;
