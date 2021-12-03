@@ -92,7 +92,7 @@ void ps_main(
     in float2 i_uv : TEXCOORD, 
     nointerpolation in uint i_material : MATERIAL,
     out float2 motion_vector : SV_Target1,
-    out float4 dithered_current : SV_Target2)
+    out float4 jittered_sample : SV_Target2)
 {
     MaterialConstants material = t_MaterialConstants[i_material];
 
@@ -117,5 +117,5 @@ void ps_main(
     float2 curr_position_screen = float2(curr_position_clip.x * 0.5f + 0.5f, 0.5f - curr_position_clip.y * 0.5f);
     motion_vector = (curr_position_screen - prev_position_screen) * g_View.viewportSize;
 
-    dithered_current = float4(diffuse, 1.0f);
+    jittered_sample = float4(diffuse, 1.0f);
 }
