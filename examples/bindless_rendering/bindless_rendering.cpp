@@ -286,7 +286,7 @@ public:
             textureDesc.format = nvrhi::Format::SRGBA8_UNORM;
             textureDesc.initialState = nvrhi::ResourceStates::RenderTarget;
             textureDesc.isUAV = true;
-            textureDesc.debugName = "DitheredCurrentBuffer";
+            textureDesc.debugName = "JitteredCurrentBuffer";
             m_JitteredCurrentBuffer = GetDevice()->createTexture(textureDesc);
 
             textureDesc.clearValue = nvrhi::Color(0.f);
@@ -360,7 +360,10 @@ public:
             m_CommandList->writeBuffer(m_ViewConstantsLastFrame, &viewConstants, sizeof(viewConstants));
         }
 
-        m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
+        if (m_EnableTAA)
+        {
+            m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
+        }
         nvrhi::Viewport windowViewport(float(fbinfo.width), float(fbinfo.height));
         m_View.SetViewport(windowViewport);
         m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewport.width() / windowViewport.height(), 0.1f));

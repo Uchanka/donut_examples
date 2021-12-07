@@ -93,7 +93,7 @@ void ps_main_post(
     float4 blended_curr = float4(0.0f, 0.0f, 0.0f, 0.0f);
     if (b_FrameIndex.frameIndex && b_FrameIndex.taaEnabled)
     {
-        float prevWeight = 0.3f;
+        float prevWeight = 0.9f;
         blended_curr = prev * prevWeight + curr * (1.0f - prevWeight);
     }
     else
