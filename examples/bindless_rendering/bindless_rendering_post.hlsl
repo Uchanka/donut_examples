@@ -41,9 +41,11 @@ struct FrameIndexConstant
 
 ConstantBuffer<PlanarViewConstants> g_View : register(b0);
 VK_PUSH_CONSTANT ConstantBuffer<FrameIndexConstant> b_FrameIndex : register(b1);
-Texture2D<float2> t_MotionVector : register(t0);
-Texture2D<float4> t_HistoryBuffer : register(t1);
-Texture2D<float4> t_DitheredCurrentBuffer : register(t2);
+Texture2D<float4> t_MotionVector : register(t0);
+Texture2D<float4> t_HistoryColor : register(t1);
+Texture2D<float4> t_JitteredCurrentBuffer : register(t2);
+Texture2D<float3> t_NormalBuffer : register(t3);
+Texture2D<float3> t_HistoryNormal : register(t4);
 
 SamplerState s_FrameSampler : register(s0);
 
@@ -84,23 +86,52 @@ void ps_main_post(
     out float4 color_buffer : SV_Target0,
     out float4 current_buffer : SV_Target3)
 {
-    float4 curr = t_DitheredCurrentBuffer[i_position.xy];
-    float2 motionVector = t_MotionVector[i_position.xy];
-    float2 backtracked_position_screen = (i_position.xy - motionVector.xy);
-    float2 backtracked_uv_coord = backtracked_position_screen / g_View.viewportSize;
-    float4 prev = t_HistoryBuffer.Sample(s_FrameSampler, backtracked_uv_coord);
+    float3 curr = t_JitteredCurrentBuffer[i_position.xy].xyz;
+    float3 curr_normal = t_NormalBuffer[i_position.xy];
+
+    float3 color_1stmoment = float3(0.0f, 0.0f, 0.0f);
+    float3 color_2ndmoment = float3(0.0f, 0.0f, 0.0f);
+    float2 motion_vector_1stmoment = float2(0.0f, 0.0f);
+    [unroll]
+    for (int dy = -1; dy <= 1; ++dy)
+    {
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            int2 probing_index = i_position.xy + int2(dx, dy);
+            probing_index = clamp(probing_index, int2(0, 0), g_View.viewportOrigin + g_View.viewportSize);
+            float3 proximity_color = t_JitteredCurrentBuffer[probing_index].xyz;
+            float2 proximity_motion = t_MotionVector[probing_index].xy;
+
+            color_1stmoment += proximity_color;
+            color_2ndmoment += proximity_color * proximity_color;
+            motion_vector_1stmoment += proximity_motion;
+        }
+    }
+
+    color_1stmoment /= 9.0f;
+    color_2ndmoment /= 9.0f;
+    motion_vector_1stmoment /= 9.0f;
+    float3 color_var = color_2ndmoment - color_1stmoment * color_1stmoment;
+    const float var_magnitude = 2.5f;
+    float3 color_width = sqrt(color_var) * var_magnitude;
+    float3 color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
+    float3 color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
     
-    float4 blended_curr = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float3 blended = curr;
     if (b_FrameIndex.frameIndex && b_FrameIndex.taaEnabled)
     {
-        float prevWeight = 0.9f;
-        blended_curr = prev * prevWeight + curr * (1.0f - prevWeight);
+        float2 prev_location = i_position.xy - motion_vector_1stmoment;
+        if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
+        {
+            prev_location /= g_View.viewportSize;
+            float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
+            hist = max(color_lowerbound, hist);
+            hist = min(color_upperbound, hist);
+
+            blended = lerp(curr, hist, 0.9f);
+        }
     }
-    else
-    {
-        blended_curr = curr;
-    }
-    current_buffer = blended_curr;
-    color_buffer = blended_curr;
-    //color_buffer = float4(motionVector / g_View.viewportSize, 0.0, 1.0);
+   
+    current_buffer = float4(blended, 1.0f);
+    color_buffer = float4(blended, 1.0f);
 }

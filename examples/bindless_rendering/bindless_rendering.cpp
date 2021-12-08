@@ -68,10 +68,12 @@ private:
     
     nvrhi::TextureHandle m_DepthBuffer;
     nvrhi::TextureHandle m_ColorBuffer;
-    nvrhi::TextureHandle m_HistoryBuffer;
+    nvrhi::TextureHandle m_HistoryColor;
+    nvrhi::TextureHandle m_HistoryNormal;
     nvrhi::TextureHandle m_JitteredCurrentBuffer;
     nvrhi::TextureHandle m_BlendedCurrentBuffer;
     nvrhi::TextureHandle m_MotionVector;
+    nvrhi::TextureHandle m_NormalBuffer;
     nvrhi::FramebufferHandle m_Framebuffer;
    
     std::shared_ptr<engine::ShaderFactory> m_ShaderFactory;
@@ -211,10 +213,12 @@ public:
     { 
         m_DepthBuffer = nullptr;
         m_ColorBuffer = nullptr;
-        m_HistoryBuffer = nullptr;
+        m_HistoryColor = nullptr;
+        m_HistoryNormal = nullptr;
         m_JitteredCurrentBuffer = nullptr;
         m_BlendedCurrentBuffer = nullptr;
         m_MotionVector = nullptr;
+        m_NormalBuffer = nullptr;
         m_Framebuffer = nullptr;
         m_GraphicsPipeline = nullptr;
         m_GraphicsPipelinePost = nullptr;
@@ -267,7 +271,7 @@ public:
 
             textureDesc.clearValue = nvrhi::Color(0.f);
             textureDesc.isTypeless = false;
-            textureDesc.format = nvrhi::Format::RG16_FLOAT;
+            textureDesc.format = nvrhi::Format::RGBA16_FLOAT;
             textureDesc.initialState = nvrhi::ResourceStates::RenderTarget;
             textureDesc.isUAV = true;
             textureDesc.debugName = "MotionVector";
@@ -278,8 +282,24 @@ public:
             textureDesc.format = nvrhi::Format::SRGBA8_UNORM;
             textureDesc.initialState = nvrhi::ResourceStates::RenderTarget;
             textureDesc.isUAV = true;
-            textureDesc.debugName = "HistoryBuffer";
-            m_HistoryBuffer = GetDevice()->createTexture(textureDesc);
+            textureDesc.debugName = "NormalBuffer";
+            m_NormalBuffer = GetDevice()->createTexture(textureDesc);
+
+            textureDesc.clearValue = nvrhi::Color(0.f);
+            textureDesc.isTypeless = false;
+            textureDesc.format = nvrhi::Format::SRGBA8_UNORM;
+            textureDesc.initialState = nvrhi::ResourceStates::RenderTarget;
+            textureDesc.isUAV = true;
+            textureDesc.debugName = "HistoryColor";
+            m_HistoryColor = GetDevice()->createTexture(textureDesc);
+
+            textureDesc.clearValue = nvrhi::Color(0.f);
+            textureDesc.isTypeless = false;
+            textureDesc.format = nvrhi::Format::SRGBA8_UNORM;
+            textureDesc.initialState = nvrhi::ResourceStates::RenderTarget;
+            textureDesc.isUAV = true;
+            textureDesc.debugName = "HistoryNormal";
+            m_HistoryNormal = GetDevice()->createTexture(textureDesc);
 
             textureDesc.clearValue = nvrhi::Color(0.f);
             textureDesc.isTypeless = false;
@@ -302,6 +322,8 @@ public:
             framebufferDesc.addColorAttachment(m_MotionVector, nvrhi::AllSubresources);
             framebufferDesc.addColorAttachment(m_JitteredCurrentBuffer, nvrhi::AllSubresources);
             framebufferDesc.addColorAttachment(m_BlendedCurrentBuffer, nvrhi::AllSubresources);
+            framebufferDesc.addColorAttachment(m_NormalBuffer, nvrhi::AllSubresources);
+            framebufferDesc.addColorAttachment(m_HistoryNormal, nvrhi::AllSubresources);
             framebufferDesc.setDepthAttachment(m_DepthBuffer);
             m_Framebuffer = GetDevice()->createFramebuffer(framebufferDesc);
 
@@ -333,9 +355,11 @@ public:
             bindingSetDescPost.bindings = {
                 nvrhi::BindingSetItem::ConstantBuffer(0, m_ViewConstants),
                 nvrhi::BindingSetItem::PushConstants(1, sizeof(int2)),
-                nvrhi::BindingSetItem::Texture_SRV(0, m_MotionVector, nvrhi::Format::RG16_FLOAT),
-                nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryBuffer, nvrhi::Format::SRGBA8_UNORM),
+                nvrhi::BindingSetItem::Texture_SRV(0, m_MotionVector, nvrhi::Format::RGBA16_FLOAT),
+                nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryColor, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredCurrentBuffer, nvrhi::Format::SRGBA8_UNORM),
+                nvrhi::BindingSetItem::Texture_SRV(3, m_NormalBuffer, nvrhi::Format::SRGBA8_UNORM),
+                nvrhi::BindingSetItem::Texture_SRV(4, m_HistoryNormal, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
             };
             nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescPost, m_BindingLayoutPost, m_BindingSetPost);
@@ -423,13 +447,15 @@ public:
         nvrhi::DrawArguments argsPost;
         argsPost.vertexCount = 6;
         m_CommandList->draw(argsPost);
-        m_CommandList->copyTexture(m_HistoryBuffer, nvrhi::TextureSlice(), m_BlendedCurrentBuffer, nvrhi::TextureSlice());
+        m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_BlendedCurrentBuffer, nvrhi::TextureSlice());
 
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
         m_CommandList->clearTextureFloat(m_MotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_JitteredCurrentBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_BlendedCurrentBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_NormalBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_HistoryNormal, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
     }
