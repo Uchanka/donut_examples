@@ -91,7 +91,7 @@ void ps_main_post(
 
     float3 color_1stmoment = float3(0.0f, 0.0f, 0.0f);
     float3 color_2ndmoment = float3(0.0f, 0.0f, 0.0f);
-    float2 motion_vector_1stmoment = float2(0.0f, 0.0f);
+    float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
     [unroll]
     for (int dy = -1; dy <= 1; ++dy)
     {
@@ -100,19 +100,19 @@ void ps_main_post(
             int2 probing_index = i_position.xy + int2(dx, dy);
             probing_index = clamp(probing_index, int2(0, 0), g_View.viewportOrigin + g_View.viewportSize);
             float3 proximity_color = t_JitteredCurrentBuffer[probing_index].xyz;
-            float2 proximity_motion = t_MotionVector[probing_index].xy;
+            float3 proximity_motion = t_MotionVector[probing_index].xyz;
 
             color_1stmoment += proximity_color;
             color_2ndmoment += proximity_color * proximity_color;
-            motion_vector_1stmoment += proximity_motion;
+            motion_1stmoment += proximity_motion;
         }
     }
 
     color_1stmoment /= 9.0f;
     color_2ndmoment /= 9.0f;
-    motion_vector_1stmoment /= 9.0f;
+    motion_1stmoment /= 9.0f;
     float3 color_var = color_2ndmoment - color_1stmoment * color_1stmoment;
-    const float var_magnitude = 2.5f;
+    const float var_magnitude = 5.0f;
     float3 color_width = sqrt(color_var) * var_magnitude;
     float3 color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
     float3 color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
@@ -120,15 +120,19 @@ void ps_main_post(
     float3 blended = curr;
     if (b_FrameIndex.frameIndex && b_FrameIndex.taaEnabled)
     {
-        float2 prev_location = i_position.xy - motion_vector_1stmoment;
+        float2 prev_location = i_position.xy - motion_1stmoment.xy * g_View.viewportSize;
         if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
         {
             prev_location /= g_View.viewportSize;
-            float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
-            hist = max(color_lowerbound, hist);
-            hist = min(color_upperbound, hist);
+            float3 prev_normal = normalize(t_NormalBuffer.Sample(s_FrameSampler, prev_location));
+            if (pow(dot(prev_normal, curr_normal), 32) > 0.80f && abs(motion_1stmoment.z) < 0.05f)
+            {
+                float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
+                hist = max(color_lowerbound, hist);
+                hist = min(color_upperbound, hist);
 
-            blended = lerp(curr, hist, 0.9f);
+                blended = lerp(curr, hist, 0.9f);
+            }
         }
     }
    
