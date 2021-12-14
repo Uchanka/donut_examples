@@ -91,11 +91,15 @@ void ps_main_post(
 
     float3 color_1stmoment = float3(0.0f, 0.0f, 0.0f);
     float3 color_2ndmoment = float3(0.0f, 0.0f, 0.0f);
+    float3 color_lowerbound = float3(1.0f, 1.0f, 1.0f);
+    float3 color_upperbound = float3(0.0f, 0.0f, 0.0f);
+
     float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
+    const int patch_size = 3;
     [unroll]
-    for (int dy = -1; dy <= 1; ++dy)
+    for (int dy = -(patch_size / 2); dy <= (patch_size / 2); ++dy)
     {
-        for (int dx = -1; dx <= 1; ++dx)
+        for (int dx = -(patch_size / 2); dx <= (patch_size / 2); ++dx)
         {
             int2 probing_index = i_position.xy + int2(dx, dy);
             probing_index = clamp(probing_index, int2(0, 0), g_View.viewportOrigin + g_View.viewportSize);
@@ -104,18 +108,22 @@ void ps_main_post(
 
             color_1stmoment += proximity_color;
             color_2ndmoment += proximity_color * proximity_color;
+            color_lowerbound = min(proximity_color, color_lowerbound);
+            color_upperbound = max(proximity_color, color_upperbound);
+
             motion_1stmoment += proximity_motion;
         }
     }
 
-    color_1stmoment /= 9.0f;
-    color_2ndmoment /= 9.0f;
-    motion_1stmoment /= 9.0f;
+    float normalization_factor = 1.0f / (patch_size * patch_size);
+    color_1stmoment *= normalization_factor;
+    color_2ndmoment *= normalization_factor;
+    motion_1stmoment *= normalization_factor;
     float3 color_var = color_2ndmoment - color_1stmoment * color_1stmoment;
     const float var_magnitude = 5.0f;
     float3 color_width = sqrt(color_var) * var_magnitude;
-    float3 color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
-    float3 color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
+    //color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
+    //color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
     
     float3 blended = curr;
     if (b_FrameIndex.frameIndex && b_FrameIndex.taaEnabled)
