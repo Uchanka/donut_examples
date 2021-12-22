@@ -107,8 +107,8 @@ public:
 
         m_VertexShader = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering.hlsl", "vs_main", nullptr, nvrhi::ShaderType::Vertex);
         m_PixelShader = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering.hlsl", "ps_main", nullptr, nvrhi::ShaderType::Pixel);
-        m_VertexShaderPost = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering_post.hlsl", "vs_main_post", nullptr, nvrhi::ShaderType::Vertex);
-        m_PixelShaderPost = m_ShaderFactory->CreateShader("/shaders/app/bindless_rendering_post.hlsl", "ps_main_post", nullptr, nvrhi::ShaderType::Pixel);
+        m_VertexShaderPost = m_ShaderFactory->CreateShader("/shaders/app/tss.hlsl", "vs_main", nullptr, nvrhi::ShaderType::Vertex);
+        m_PixelShaderPost = m_ShaderFactory->CreateShader("/shaders/app/tss.hlsl", "ps_main", nullptr, nvrhi::ShaderType::Pixel);
 
         nvrhi::BindlessLayoutDesc bindlessLayoutDesc;
         bindlessLayoutDesc.visibility = nvrhi::ShaderType::All;

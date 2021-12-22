@@ -71,7 +71,7 @@ static const float2 g_uvs[] =
     float2(1.0f, 1.0f)
 };
 
-void vs_main_post(
+void vs_main(
     in uint i_vertexID : SV_VertexID,
     out float4 o_position : SV_Position,
     out float2 o_uv_coord : TEXTURE_COORD)
@@ -80,7 +80,7 @@ void vs_main_post(
     o_uv_coord = g_uvs[i_vertexID];
 }
 
-void ps_main_post(
+void ps_main(
     in float4 i_position : SV_Position,
     in float2 i_uv_coord : TEXTURE_COORD,
     out float4 color_buffer : SV_Target0,
