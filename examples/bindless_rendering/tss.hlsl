@@ -103,8 +103,8 @@ void ps_main(
         {
             int2 probing_index = i_position.xy + int2(dx, dy);
             probing_index = clamp(probing_index, int2(0, 0), g_View.viewportOrigin + g_View.viewportSize);
-            float3 proximity_color = t_JitteredCurrentBuffer[probing_index].xyz;
-            float3 proximity_motion = t_MotionVector[probing_index].xyz;
+            float3 proximity_color = t_JitteredCurrentBuffer.Sample(s_FrameSampler, probing_index * g_View.viewportSizeInv).xyz;
+            float3 proximity_motion = t_MotionVector.Sample(s_FrameSampler, probing_index * g_View.viewportSizeInv).xyz;
 
             color_1stmoment += proximity_color;
             color_2ndmoment += proximity_color * proximity_color;

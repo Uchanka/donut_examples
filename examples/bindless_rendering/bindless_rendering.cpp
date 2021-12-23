@@ -474,12 +474,13 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
 
         m_CommandList->open();
-        m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
 
         nvrhi::Viewport windowViewportTSS(static_cast<float>(upsampledWidth), static_cast<float>(upsampledHeight));
         m_View.SetViewport(windowViewportTSS);
         m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewportTSS.width() / windowViewportTSS.height(), 0.1f));
         m_View.UpdateCache();
+        m_View.FillPlanarViewConstants(viewConstants);
+        m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
 
         nvrhi::GraphicsState statePost;
         statePost.pipeline = m_TSSPipeline;
