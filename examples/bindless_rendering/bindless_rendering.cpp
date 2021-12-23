@@ -86,12 +86,11 @@ private:
 
     nvrhi::TextureHandle m_SSColorBuffer;
     nvrhi::TextureHandle m_SSNormalBuffer;
-    //nvrhi::TextureHandle m_SSDepthBuffer;
-
+   
     nvrhi::TextureHandle m_SSMotionVector;
     
     //Low-res
-    nvrhi::TextureHandle m_JitteredCurrentBuffer;
+    nvrhi::TextureHandle m_JitteredColor;
     nvrhi::TextureHandle m_NormalBuffer;
     nvrhi::TextureHandle m_RenderMotionVector;
 
@@ -245,7 +244,7 @@ public:
         m_ColorBuffer = nullptr;
         m_HistoryColor = nullptr;
         m_HistoryNormal = nullptr;
-        m_JitteredCurrentBuffer = nullptr;
+        m_JitteredColor = nullptr;
         m_SSColorBuffer = nullptr;
         m_SSMotionVector = nullptr;
         m_NormalBuffer = nullptr;
@@ -313,6 +312,9 @@ public:
             textureDescHighRes.debugName = "HistoryNormal";
             m_HistoryNormal = GetDevice()->createTexture(textureDescHighRes);
 
+            textureDescHighRes.debugName = "SupersampledNormalBuffer";
+            m_SSNormalBuffer = GetDevice()->createTexture(textureDescHighRes);
+
             textureDescHighRes.format = nvrhi::Format::RGBA16_FLOAT;
             textureDescHighRes.debugName = "SupersampledMotionVector";
             m_SSMotionVector = GetDevice()->createTexture(textureDescHighRes);
@@ -328,33 +330,38 @@ public:
             textureDescLowRes.debugName = "JitteredCurrentBuffer";
             textureDescLowRes.width = renderedWidth;
             textureDescLowRes.height = renderedHeight;
-            m_JitteredCurrentBuffer = GetDevice()->createTexture(textureDescLowRes);
+            m_JitteredColor = GetDevice()->createTexture(textureDescLowRes);
 
-            textureDescHighRes.format = nvrhi::Format::D24S8;
-            textureDescHighRes.debugName = "DepthBuffer";
-            textureDescHighRes.initialState = nvrhi::ResourceStates::DepthWrite;
-            m_DepthBuffer = GetDevice()->createTexture(textureDescHighRes);
+            textureDescLowRes.format = nvrhi::Format::D24S8;
+            textureDescLowRes.debugName = "DepthBuffer";
+            textureDescLowRes.initialState = nvrhi::ResourceStates::DepthWrite;
+            m_DepthBuffer = GetDevice()->createTexture(textureDescLowRes);
 
             textureDescLowRes.isTypeless = false;
             textureDescLowRes.format = nvrhi::Format::SRGBA8_UNORM;
             textureDescLowRes.isUAV = true;
+            textureDescLowRes.initialState = nvrhi::ResourceStates::RenderTarget;
             textureDescLowRes.debugName = "NormalBuffer";
             m_NormalBuffer = GetDevice()->createTexture(textureDescLowRes);
 
             textureDescLowRes.format = nvrhi::Format::RGBA16_FLOAT;
             textureDescLowRes.debugName = "MotionVector";
-            m_SSMotionVector = GetDevice()->createTexture(textureDescLowRes);
+            m_RenderMotionVector = GetDevice()->createTexture(textureDescLowRes);
 
             //High-res
+            nvrhi::FramebufferDesc framebufferDescHigher;
+            framebufferDescHigher.addColorAttachment(m_ColorBuffer, nvrhi::AllSubresources);
+            framebufferDescHigher.addColorAttachment(m_SSMotionVector, nvrhi::AllSubresources);
+            framebufferDescHigher.addColorAttachment(m_SSNormalBuffer, nvrhi::AllSubresources);
+            framebufferDescHigher.addColorAttachment(m_HistoryNormal, nvrhi::AllSubresources);
+            framebufferDescHigher.addColorAttachment(m_SSColorBuffer, nvrhi::AllSubresources);
+            m_TSSFramebuffer = GetDevice()->createFramebuffer(framebufferDescHigher);
 
             //Low-res
             nvrhi::FramebufferDesc framebufferDescLower;
-            framebufferDescLower.addColorAttachment(m_ColorBuffer, nvrhi::AllSubresources);
-            framebufferDescLower.addColorAttachment(m_SSMotionVector, nvrhi::AllSubresources);
-            framebufferDescLower.addColorAttachment(m_JitteredCurrentBuffer, nvrhi::AllSubresources);
-            framebufferDescLower.addColorAttachment(m_SSColorBuffer, nvrhi::AllSubresources);
+            framebufferDescLower.addColorAttachment(m_JitteredColor, nvrhi::AllSubresources);
             framebufferDescLower.addColorAttachment(m_NormalBuffer, nvrhi::AllSubresources);
-            framebufferDescLower.addColorAttachment(m_HistoryNormal, nvrhi::AllSubresources);
+            framebufferDescLower.addColorAttachment(m_RenderMotionVector, nvrhi::AllSubresources);
             framebufferDescLower.setDepthAttachment(m_DepthBuffer);
             m_RenderFramebuffer = GetDevice()->createFramebuffer(framebufferDescLower);
 
@@ -388,7 +395,7 @@ public:
                 nvrhi::BindingSetItem::PushConstants(1, sizeof(int2)),
                 nvrhi::BindingSetItem::Texture_SRV(0, m_SSMotionVector, nvrhi::Format::RGBA16_FLOAT),
                 nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryColor, nvrhi::Format::SRGBA8_UNORM),
-                nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredCurrentBuffer, nvrhi::Format::SRGBA8_UNORM),
+                nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredColor, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(3, m_NormalBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(4, m_HistoryNormal, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
@@ -483,7 +490,7 @@ public:
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
         m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_JitteredCurrentBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_JitteredColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_SSColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_NormalBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_HistoryNormal, nvrhi::AllSubresources, nvrhi::Color(0.f));
