@@ -133,7 +133,7 @@ void ps_main(
         {
             prev_location /= g_View.viewportSize;
             float3 prev_normal = normalize(t_NormalBuffer.Sample(s_FrameSampler, prev_location));
-            if (pow(dot(prev_normal, curr_normal), 32) > 0.80f && abs(motion_1stmoment.z) < 0.05f)
+            //if (pow(dot(prev_normal, curr_normal), 32) > 0.80f && abs(motion_1stmoment.z) < 0.05f)
             {
                 float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
                 hist = max(color_lowerbound, hist);
@@ -145,5 +145,5 @@ void ps_main(
     }
    
     current_buffer = float4(blended, 1.0f);
-    color_buffer = float4(motion_1stmoment, 1.0f);
+    color_buffer = float4(blended, 1.0f);
 }

@@ -498,6 +498,7 @@ public:
         m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
 
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
+        m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_JitteredColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
