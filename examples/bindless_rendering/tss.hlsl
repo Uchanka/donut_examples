@@ -86,7 +86,7 @@ void ps_main(
     out float4 color_buffer : SV_Target0,
     out float4 current_buffer : SV_Target3)
 {
-    float3 curr = t_JitteredCurrentBuffer[i_position.xy].xyz;
+    float3 curr = t_JitteredCurrentBuffer.Sample(s_FrameSampler, i_position.xy * g_View.viewportSizeInv).xyz;
     float3 curr_normal = t_NormalBuffer[i_position.xy];
 
     float3 color_1stmoment = float3(0.0f, 0.0f, 0.0f);
