@@ -110,7 +110,7 @@ private:
     
     bool m_EnableAnimations = true;
     bool m_EnableTAA = true;
-    float m_TSSMagnifyingFactor = 2.0f;
+    float m_TSSMagnifyingFactor = 1.5f;
     float m_WallclockTime = 0.f;
 
 public:
@@ -397,7 +397,7 @@ public:
             bindingSetDescPost.bindings = {
                 nvrhi::BindingSetItem::ConstantBuffer(0, m_ThisFrameViewConstants),
                 nvrhi::BindingSetItem::PushConstants(1, sizeof(int2)),
-                nvrhi::BindingSetItem::Texture_SRV(0, m_SSMotionVector, nvrhi::Format::RGBA16_FLOAT),
+                nvrhi::BindingSetItem::Texture_SRV(0, m_RenderMotionVector, nvrhi::Format::RGBA16_FLOAT),
                 nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryColor, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredColor, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(3, m_NormalBuffer, nvrhi::Format::SRGBA8_UNORM),

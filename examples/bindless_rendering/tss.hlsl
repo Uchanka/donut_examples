@@ -87,7 +87,7 @@ void ps_main(
     out float4 current_buffer : SV_Target1)
 {
     float3 curr = t_JitteredCurrentBuffer.Sample(s_FrameSampler, i_position.xy * g_View.viewportSizeInv).xyz;
-    float3 curr_normal = t_NormalBuffer[i_position.xy];
+    float3 curr_normal = t_NormalBuffer.Sample(s_FrameSampler, i_position.xy * g_View.viewportSizeInv);
 
     float3 color_1stmoment = float3(0.0f, 0.0f, 0.0f);
     float3 color_2ndmoment = float3(0.0f, 0.0f, 0.0f);
@@ -145,5 +145,5 @@ void ps_main(
     }
    
     current_buffer = float4(blended, 1.0f);
-    color_buffer = float4(blended, 1.0f);
+    color_buffer = float4(motion_1stmoment, 1.0f);
 }
