@@ -115,7 +115,7 @@ void ps_main(
         }
     }
 
-    float normalization_factor = 1.0f / (patch_size * patch_size);
+    const float normalization_factor = 1.0f / (patch_size * patch_size);
     color_1stmoment *= normalization_factor;
     color_2ndmoment *= normalization_factor;
     motion_1stmoment *= normalization_factor;
@@ -126,7 +126,7 @@ void ps_main(
     //color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
     
     float3 blended = curr;
-    if (b_FrameIndex.frameIndex && b_FrameIndex.taaEnabled)
+    if (b_FrameIndex.frameIndex != 0 && b_FrameIndex.taaEnabled)
     {
         float2 prev_location = i_position.xy - motion_1stmoment.xy * g_View.viewportSize;
         if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))

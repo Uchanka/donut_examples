@@ -49,7 +49,7 @@ private:
 	std::shared_ptr<vfs::RootFileSystem> m_RootFS;
 
     nvrhi::CommandListHandle m_CommandList;
-    nvrhi::CommandListHandle m_CommandListPost;
+    
     nvrhi::BindingLayoutHandle m_BindingLayout;
     nvrhi::BindingLayoutHandle m_BindingLayoutPost;
     nvrhi::BindingLayoutHandle m_BindlessLayout;
@@ -126,7 +126,6 @@ public:
         m_TextureCache = std::make_shared<engine::TextureCache>(GetDevice(), nativeFS, m_DescriptorTableManager);
 
         m_CommandList = GetDevice()->createCommandList();
-        m_CommandListPost = GetDevice()->createCommandList();
         
         SetAsynchronousLoadingEnabled(false);
         BeginLoadingScene(nativeFS, sceneFileName);
