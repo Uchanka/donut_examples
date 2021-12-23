@@ -82,16 +82,16 @@ private:
     nvrhi::TextureHandle m_ColorBuffer;
 
     nvrhi::TextureHandle m_HistoryColor;
-    nvrhi::TextureHandle m_HistoryNormal;
-
+    
     nvrhi::TextureHandle m_SSColorBuffer;
     nvrhi::TextureHandle m_SSNormalBuffer;
-   
+    nvrhi::TextureHandle m_SSHistoryNormal;
     nvrhi::TextureHandle m_SSMotionVector;
     
     //Low-res
     nvrhi::TextureHandle m_JitteredColor;
     nvrhi::TextureHandle m_NormalBuffer;
+    nvrhi::TextureHandle m_HistoryNormal;
     nvrhi::TextureHandle m_RenderMotionVector;
 
     //Stencils
@@ -277,15 +277,14 @@ public:
     void Render(nvrhi::IFramebuffer* framebuffer) override
     {
         const auto& fbinfo = framebuffer->getFramebufferInfo();
+        uint32_t upsampledWidth = fbinfo.width;
+        uint32_t upsampledHeight = fbinfo.height;
+        const float tSSInvUpsampleFactor = 1.0f / m_TSSMagnifyingFactor;
+        uint32_t renderWidth = static_cast<uint32_t>(upsampledWidth * tSSInvUpsampleFactor);
+        uint32_t renderHeight = static_cast<uint32_t>(upsampledHeight * tSSInvUpsampleFactor);
 
         if (!m_RenderPipeline || !m_TSSPipeline)
         {
-            uint32_t upsampledWidth = fbinfo.width;
-            uint32_t upsampledHeight = fbinfo.height;
-            const float tSSInvUpsampleFactor = 1.0f / m_TSSMagnifyingFactor;
-            uint32_t renderedWidth = static_cast<uint32_t>(upsampledWidth * tSSInvUpsampleFactor);
-            uint32_t renderedHeight = static_cast<uint32_t>(upsampledHeight * tSSInvUpsampleFactor);
-
             //High-res texture
             nvrhi::TextureDesc textureDescHighRes;
             textureDescHighRes.format = nvrhi::Format::SRGBA8_UNORM;
@@ -309,11 +308,11 @@ public:
             textureDescHighRes.debugName = "HistoryColor";
             m_HistoryColor = GetDevice()->createTexture(textureDescHighRes);
 
-            textureDescHighRes.debugName = "HistoryNormal";
-            m_HistoryNormal = GetDevice()->createTexture(textureDescHighRes);
-
             textureDescHighRes.debugName = "SupersampledNormalBuffer";
             m_SSNormalBuffer = GetDevice()->createTexture(textureDescHighRes);
+
+            textureDescHighRes.debugName = "SupersampledHistoryNormal";
+            m_SSHistoryNormal = GetDevice()->createTexture(textureDescHighRes);
 
             textureDescHighRes.format = nvrhi::Format::RGBA16_FLOAT;
             textureDescHighRes.debugName = "SupersampledMotionVector";
@@ -328,8 +327,8 @@ public:
             textureDescLowRes.clearValue = nvrhi::Color(0.f);
             textureDescLowRes.useClearValue = true;
             textureDescLowRes.debugName = "JitteredCurrentBuffer";
-            textureDescLowRes.width = renderedWidth;
-            textureDescLowRes.height = renderedHeight;
+            textureDescLowRes.width = renderWidth;
+            textureDescLowRes.height = renderHeight;
             m_JitteredColor = GetDevice()->createTexture(textureDescLowRes);
 
             textureDescLowRes.format = nvrhi::Format::D24S8;
@@ -344,6 +343,9 @@ public:
             textureDescLowRes.debugName = "NormalBuffer";
             m_NormalBuffer = GetDevice()->createTexture(textureDescLowRes);
 
+            textureDescLowRes.debugName = "HistoryNormal";
+            m_HistoryNormal = GetDevice()->createTexture(textureDescLowRes);
+
             textureDescLowRes.format = nvrhi::Format::RGBA16_FLOAT;
             textureDescLowRes.debugName = "MotionVector";
             m_RenderMotionVector = GetDevice()->createTexture(textureDescLowRes);
@@ -351,16 +353,18 @@ public:
             //High-res
             nvrhi::FramebufferDesc framebufferDescHigher;
             framebufferDescHigher.addColorAttachment(m_ColorBuffer, nvrhi::AllSubresources);
+            framebufferDescHigher.addColorAttachment(m_SSColorBuffer, nvrhi::AllSubresources);
             framebufferDescHigher.addColorAttachment(m_SSMotionVector, nvrhi::AllSubresources);
             framebufferDescHigher.addColorAttachment(m_SSNormalBuffer, nvrhi::AllSubresources);
-            framebufferDescHigher.addColorAttachment(m_HistoryNormal, nvrhi::AllSubresources);
-            framebufferDescHigher.addColorAttachment(m_SSColorBuffer, nvrhi::AllSubresources);
+            framebufferDescHigher.addColorAttachment(m_SSHistoryNormal, nvrhi::AllSubresources);
+            framebufferDescHigher.addColorAttachment(m_HistoryColor, nvrhi::AllSubresources);
             m_TSSFramebuffer = GetDevice()->createFramebuffer(framebufferDescHigher);
 
             //Low-res
             nvrhi::FramebufferDesc framebufferDescLower;
             framebufferDescLower.addColorAttachment(m_JitteredColor, nvrhi::AllSubresources);
             framebufferDescLower.addColorAttachment(m_NormalBuffer, nvrhi::AllSubresources);
+            framebufferDescLower.addColorAttachment(m_HistoryNormal, nvrhi::AllSubresources);
             framebufferDescLower.addColorAttachment(m_RenderMotionVector, nvrhi::AllSubresources);
             framebufferDescLower.setDepthAttachment(m_DepthBuffer);
             m_RenderFramebuffer = GetDevice()->createFramebuffer(framebufferDescLower);
@@ -411,7 +415,7 @@ public:
             pipelineDescPost.renderState.depthStencilState.stencilEnable = false;
             pipelineDescPost.renderState.rasterState.setCullNone();
 
-            m_TSSPipeline = GetDevice()->createGraphicsPipeline(pipelineDescPost, m_RenderFramebuffer);
+            m_TSSPipeline = GetDevice()->createGraphicsPipeline(pipelineDescPost, m_TSSFramebuffer);
         }
 
         m_CommandList->open();
@@ -426,7 +430,7 @@ public:
         {
             m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
         }
-        nvrhi::Viewport windowViewport(float(fbinfo.width), float(fbinfo.height));
+        nvrhi::Viewport windowViewport(static_cast<float>(renderWidth), static_cast<float>(renderHeight));
         m_View.SetViewport(windowViewport);
         m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewport.width() / windowViewport.height(), 0.1f));
         m_View.UpdateCache();
@@ -472,9 +476,14 @@ public:
         m_CommandList->open();
         m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
 
+        nvrhi::Viewport windowViewportTSS(static_cast<float>(upsampledWidth), static_cast<float>(upsampledHeight));
+        m_View.SetViewport(windowViewportTSS);
+        m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewportTSS.width() / windowViewportTSS.height(), 0.1f));
+        m_View.UpdateCache();
+
         nvrhi::GraphicsState statePost;
         statePost.pipeline = m_TSSPipeline;
-        statePost.framebuffer = m_RenderFramebuffer;
+        statePost.framebuffer = m_TSSFramebuffer;
         statePost.bindings = { m_TSSBindingSet };
         statePost.viewport = m_View.GetViewportState();
         m_CommandList->setGraphicsState(statePost);

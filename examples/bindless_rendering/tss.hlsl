@@ -84,7 +84,7 @@ void ps_main(
     in float4 i_position : SV_Position,
     in float2 i_uv_coord : TEXTURE_COORD,
     out float4 color_buffer : SV_Target0,
-    out float4 current_buffer : SV_Target3)
+    out float4 current_buffer : SV_Target1)
 {
     float3 curr = t_JitteredCurrentBuffer.Sample(s_FrameSampler, i_position.xy * g_View.viewportSizeInv).xyz;
     float3 curr_normal = t_NormalBuffer[i_position.xy];

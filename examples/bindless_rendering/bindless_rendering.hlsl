@@ -99,10 +99,10 @@ void ps_main(
     in float3 i_prev_normal : PREV_NORMAL,
     in float2 i_uv : TEXCOORD, 
     nointerpolation in uint i_material : MATERIAL,
-    out float4 motion_vector : SV_Target1,
-    out float4 jittered_sample : SV_Target2,
-    out float3 normal_vector : SV_Target4,
-    out float3 prev_normal : SV_Target5)
+    out float4 jittered_sample : SV_Target0,
+    out float3 normal_vector : SV_Target1,
+    out float3 prev_normal : SV_Target2,
+    out float4 motion_vector : SV_Target3)
 {
     MaterialConstants material = t_MaterialConstants[i_material];
 
