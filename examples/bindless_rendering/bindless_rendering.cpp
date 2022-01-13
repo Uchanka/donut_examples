@@ -43,6 +43,8 @@ using namespace donut::math;
 
 static const char* g_WindowTitle = "Donut Example: Bindless Rendering";
 
+static enum AAMode { NATIVE_RESOLUTION, UPSAMPLED, TSS, PLACE_HOLDER };
+
 class BindlessRendering : public app::ApplicationBase
 {
 private:
@@ -109,8 +111,8 @@ private:
     engine::PlanarView m_View;
     
     bool m_EnableAnimations = true;
-    bool m_EnableTAA = true;
-    float m_TSSMagnifyingFactor = 1.5f;
+    int m_currentAAMode = NATIVE_RESOLUTION;
+    float m_TSSMagnifyingFactor = 2.0f;
     float m_WallclockTime = 0.f;
 
 public:
@@ -197,7 +199,8 @@ public:
         }
         if (key == GLFW_KEY_T && action == GLFW_PRESS)
         {
-            m_EnableTAA = !m_EnableTAA;
+            m_currentAAMode = (m_currentAAMode + 1) % PLACE_HOLDER;
+            BackBufferResizing();
             return true;
         }
 
@@ -242,15 +245,32 @@ public:
     { 
         m_DepthBuffer = nullptr;
         m_ColorBuffer = nullptr;
+        m_SSColorBuffer = nullptr;
         m_HistoryColor = nullptr;
         m_HistoryNormal = nullptr;
         m_JitteredColor = nullptr;
-        m_SSColorBuffer = nullptr;
+        m_RenderMotionVector = nullptr;
         m_SSMotionVector = nullptr;
+        m_SSNormalBuffer = nullptr;
+        m_SSHistoryNormal = nullptr;
         m_NormalBuffer = nullptr;
+
+        m_TSSFramebuffer = nullptr;
         m_RenderFramebuffer = nullptr;
+
+        m_RenderBindingLayout = nullptr;
+        m_MotionBindingLayout = nullptr;
+        m_UpsampleBindingLayout = nullptr;
+        m_TSSBindingLayout = nullptr;
+
+        m_RenderBindingSet = nullptr;
+        m_MotionBindingSet = nullptr;
+        m_UpsampleBindingSet = nullptr;
+        m_TSSBindingSet = nullptr;
+
         m_RenderPipeline = nullptr;
         m_TSSPipeline = nullptr;
+
         m_BindingCache->Clear();
     }
 
@@ -270,21 +290,55 @@ public:
 
     float2 GetCurrentFramePixelOffset(const int frameIndex)
     {
+        float2 fixedMSAAPosition[4] = { float2(0.25f, 0.25f), float2(0.25f, 0.75f), float2(0.75f, 0.75f), float2(0.75f, 0.25f) };
         int clampedIndex = frameIndex % 16 + 1;
-        return float2(VanDerCorputSequence(clampedIndex, 2), VanDerCorputSequence(clampedIndex, 3));
+        switch (m_currentAAMode)
+        {
+        /*case NATIVE_RESOLUTION:
+            return float2(.0f);
+        case UPSAMPLED:
+            return float2(.0f);*/
+        case TSS:
+            return fixedMSAAPosition[frameIndex % (sizeof(fixedMSAAPosition) / sizeof(fixedMSAAPosition[0]))];
+            //return float2(VanDerCorputSequence(clampedIndex, 2), VanDerCorputSequence(clampedIndex, 3));
+        default:
+            return float2(.0f);
+        }
     }
 
     void Render(nvrhi::IFramebuffer* framebuffer) override
     {
         const auto& fbinfo = framebuffer->getFramebufferInfo();
-        uint32_t upsampledWidth = fbinfo.width;
-        uint32_t upsampledHeight = fbinfo.height;
         const float tSSInvUpsampleFactor = 1.0f / m_TSSMagnifyingFactor;
-        uint32_t renderWidth = static_cast<uint32_t>(upsampledWidth * tSSInvUpsampleFactor);
-        uint32_t renderHeight = static_cast<uint32_t>(upsampledHeight * tSSInvUpsampleFactor);
+        uint32_t upsampledWidth, upsampledHeight, renderWidth, renderHeight;
+        switch (m_currentAAMode)
+        {
+        case NATIVE_RESOLUTION:
+            upsampledWidth = fbinfo.width;
+            upsampledHeight = fbinfo.height;
+            renderWidth = upsampledWidth;
+            renderHeight = upsampledHeight;
+            break;
+        case UPSAMPLED:
+            upsampledWidth = fbinfo.width;
+            upsampledHeight = fbinfo.height;
+            renderWidth = upsampledWidth * tSSInvUpsampleFactor;
+            renderHeight = upsampledHeight * tSSInvUpsampleFactor;
+            break;
+        case TSS:
+            upsampledWidth = fbinfo.width;
+            upsampledHeight = fbinfo.height;
+            renderWidth = upsampledWidth * tSSInvUpsampleFactor;
+            renderHeight = upsampledHeight * tSSInvUpsampleFactor;
+            break;
+        default:
+            break;
+        }
 
+        int frameHasBeenReset = 0;
         if (!m_RenderPipeline || !m_TSSPipeline)
         {
+            frameHasBeenReset = 1;
             //High-res texture
             nvrhi::TextureDesc textureDescHighRes;
             textureDescHighRes.format = nvrhi::Format::SRGBA8_UNORM;
@@ -426,7 +480,7 @@ public:
             m_CommandList->writeBuffer(m_LastFrameViewConstants, &viewConstants, sizeof(viewConstants));
         }
 
-        if (m_EnableTAA)
+        if (m_currentAAMode == TSS)
         {
             m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
         }
@@ -472,13 +526,13 @@ public:
 
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
-
+        
         m_CommandList->open();
-
         nvrhi::Viewport windowViewportTSS(static_cast<float>(upsampledWidth), static_cast<float>(upsampledHeight));
         m_View.SetViewport(windowViewportTSS);
         m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewportTSS.width() / windowViewportTSS.height(), 0.1f));
         m_View.UpdateCache();
+
         m_View.FillPlanarViewConstants(viewConstants);
         m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
 
@@ -489,12 +543,16 @@ public:
         statePost.viewport = m_View.GetViewportState();
         m_CommandList->setGraphicsState(statePost);
 
-        int2 frameIndex = int2(GetFrameIndex(), m_EnableTAA ? 1 : 0);
-        m_CommandList->setPushConstants(&frameIndex, sizeof(frameIndex));
+        int2 frameStatus = int2(frameHasBeenReset, m_currentAAMode);
+        m_CommandList->setPushConstants(&frameStatus, sizeof(frameStatus));
 
         nvrhi::DrawArguments argsPost;
         argsPost.vertexCount = 6;
         m_CommandList->draw(argsPost);
+        m_CommandList->close();
+        GetDevice()->executeCommandList(m_CommandList);
+
+        m_CommandList->open();
         m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
 
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());

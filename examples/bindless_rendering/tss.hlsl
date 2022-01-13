@@ -35,8 +35,8 @@
 
 struct FrameIndexConstant
 {
-    int frameIndex;
-    int taaEnabled;
+    int frameHasReset;
+    int currentAAMode;
 };
 
 ConstantBuffer<PlanarViewConstants> g_View : register(b0);
@@ -126,7 +126,7 @@ void ps_main(
     //color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
     
     float3 blended = curr;
-    if (b_FrameIndex.frameIndex != 0 && b_FrameIndex.taaEnabled)
+    if (b_FrameIndex.frameHasReset == 0 && b_FrameIndex.currentAAMode == 2)
     {
         float2 prev_location = i_position.xy - motion_1stmoment.xy * g_View.viewportSize;
         if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
@@ -143,7 +143,8 @@ void ps_main(
             }
         }
     }
-   
+
+    //blended = t_HistoryNormal.Sample(s_FrameSampler, i_position.xy * g_View.viewportSizeInv).xyz;
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
 }
