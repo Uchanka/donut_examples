@@ -76,6 +76,7 @@ private:
     nvrhi::GraphicsPipelineHandle m_RenderPipeline;
     nvrhi::GraphicsPipelineHandle m_TSSPipeline;
 
+    nvrhi::BufferHandle m_SamplingRate;
     nvrhi::BufferHandle m_FrameIndex;
     nvrhi::BufferHandle m_ThisFrameViewConstants;
     nvrhi::BufferHandle m_LastFrameViewConstants;
@@ -111,8 +112,8 @@ private:
     engine::PlanarView m_View;
     
     bool m_EnableAnimations = true;
-    int m_currentAAMode = NATIVE_RESOLUTION;
-    float m_TSSMagnifyingFactor = 2.0f;
+    int m_currentAAMode = TSS;
+    float m_slidingSamplingRate = 0.5f;
     float m_WallclockTime = 0.f;
 
 public:
@@ -167,6 +168,7 @@ public:
         m_Camera.LookAt(float3(0.f, 1.8f, 0.f), float3(1.f, 1.8f, 0.f));
         m_Camera.SetMoveSpeed(3.f);
 
+        m_SamplingRate = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(float), "SamplingRate", engine::c_MaxRenderPassConstantBufferVersions));
         m_FrameIndex = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(int), "FrameIndex", engine::c_MaxRenderPassConstantBufferVersions));
         m_ThisFrameViewConstants = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstants", engine::c_MaxRenderPassConstantBufferVersions));
         m_LastFrameViewConstants = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstantsLastFrame", engine::c_MaxRenderPassConstantBufferVersions));
@@ -290,7 +292,7 @@ public:
 
     float2 GetCurrentFramePixelOffset(const int frameIndex)
     {
-        float2 fixedMSAAPosition[4] = { float2(0.25f, 0.25f), float2(0.25f, 0.75f), float2(0.75f, 0.75f), float2(0.75f, 0.25f) };
+        float2 fixedMSAAPosition[4] = { float2(-0.25f, -0.25f), float2(-0.25f, 0.25f), float2(0.25f, -0.25f), float2(0.25f, 0.25f) };
         int clampedIndex = frameIndex % 16 + 1;
         switch (m_currentAAMode)
         {
@@ -309,7 +311,6 @@ public:
     void Render(nvrhi::IFramebuffer* framebuffer) override
     {
         const auto& fbinfo = framebuffer->getFramebufferInfo();
-        const float tSSInvUpsampleFactor = 1.0f / m_TSSMagnifyingFactor;
         uint32_t upsampledWidth, upsampledHeight, renderWidth, renderHeight;
         switch (m_currentAAMode)
         {
@@ -322,14 +323,14 @@ public:
         case UPSAMPLED:
             upsampledWidth = fbinfo.width;
             upsampledHeight = fbinfo.height;
-            renderWidth = upsampledWidth * tSSInvUpsampleFactor;
-            renderHeight = upsampledHeight * tSSInvUpsampleFactor;
+            renderWidth = upsampledWidth * m_slidingSamplingRate;
+            renderHeight = upsampledHeight * m_slidingSamplingRate;
             break;
         case TSS:
             upsampledWidth = fbinfo.width;
             upsampledHeight = fbinfo.height;
-            renderWidth = upsampledWidth * tSSInvUpsampleFactor;
-            renderHeight = upsampledHeight * tSSInvUpsampleFactor;
+            renderWidth = upsampledWidth * m_slidingSamplingRate;
+            renderHeight = upsampledHeight * m_slidingSamplingRate;
             break;
         default:
             break;
@@ -450,7 +451,8 @@ public:
             nvrhi::BindingSetDesc bindingSetDescPost;
             bindingSetDescPost.bindings = {
                 nvrhi::BindingSetItem::ConstantBuffer(0, m_ThisFrameViewConstants),
-                nvrhi::BindingSetItem::PushConstants(1, sizeof(int2)),
+                nvrhi::BindingSetItem::ConstantBuffer(1, m_SamplingRate),
+                nvrhi::BindingSetItem::PushConstants(2, sizeof(int2)),
                 nvrhi::BindingSetItem::Texture_SRV(0, m_RenderMotionVector, nvrhi::Format::RGBA16_FLOAT),
                 nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryColor, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredColor, nvrhi::Format::SRGBA8_UNORM),
@@ -473,6 +475,7 @@ public:
         }
 
         m_CommandList->open();
+        
         PlanarViewConstants viewConstants;
         if (GetFrameIndex() != 0)
         {
@@ -534,7 +537,9 @@ public:
         m_View.UpdateCache();
 
         m_View.FillPlanarViewConstants(viewConstants);
+
         m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
+        m_CommandList->writeBuffer(m_SamplingRate, &m_slidingSamplingRate, sizeof(m_slidingSamplingRate));
 
         nvrhi::GraphicsState statePost;
         statePost.pipeline = m_TSSPipeline;
@@ -545,7 +550,7 @@ public:
 
         int2 frameStatus = int2(frameHasBeenReset, m_currentAAMode);
         m_CommandList->setPushConstants(&frameStatus, sizeof(frameStatus));
-
+        
         nvrhi::DrawArguments argsPost;
         argsPost.vertexCount = 6;
         m_CommandList->draw(argsPost);
@@ -553,7 +558,14 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
 
         m_CommandList->open();
-        m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
+        if (frameHasBeenReset == 1)
+        {
+            m_CommandList->clearTextureFloat(m_HistoryColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        }
+        else
+        {
+            m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
+        }
 
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
         m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
@@ -563,6 +575,7 @@ public:
         m_CommandList->clearTextureFloat(m_SSColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_NormalBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_HistoryNormal, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
     }

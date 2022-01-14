@@ -33,12 +33,6 @@
 #define VK_BINDING(reg,dset) 
 #endif
 
-struct FrameIndexConstant
-{
-    int frameIndex;
-    int taaEnabled;
-};
-
 ConstantBuffer<PlanarViewConstants> g_View : register(b0);
 VK_PUSH_CONSTANT ConstantBuffer<FrameIndexConstant> b_FrameIndex : register(b1);
 Texture2D<float4> t_MotionVector : register(t0);
@@ -87,63 +81,7 @@ void ps_main(
     out float4 current_buffer : SV_Target3)
 {
     float3 curr = t_JitteredCurrentBuffer[i_position.xy].xyz;
-    float3 curr_normal = t_NormalBuffer[i_position.xy];
-
-    float3 color_1stmoment = float3(0.0f, 0.0f, 0.0f);
-    float3 color_2ndmoment = float3(0.0f, 0.0f, 0.0f);
-    float3 color_lowerbound = float3(1.0f, 1.0f, 1.0f);
-    float3 color_upperbound = float3(0.0f, 0.0f, 0.0f);
-
-    float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
-    const int patch_size = 3;
-    [unroll]
-    for (int dy = -(patch_size / 2); dy <= (patch_size / 2); ++dy)
-    {
-        for (int dx = -(patch_size / 2); dx <= (patch_size / 2); ++dx)
-        {
-            int2 probing_index = i_position.xy + int2(dx, dy);
-            probing_index = clamp(probing_index, int2(0, 0), g_View.viewportOrigin + g_View.viewportSize);
-            float3 proximity_color = t_JitteredCurrentBuffer[probing_index].xyz;
-            float3 proximity_motion = t_MotionVector[probing_index].xyz;
-
-            color_1stmoment += proximity_color;
-            color_2ndmoment += proximity_color * proximity_color;
-            color_lowerbound = min(proximity_color, color_lowerbound);
-            color_upperbound = max(proximity_color, color_upperbound);
-
-            motion_1stmoment += proximity_motion;
-        }
-    }
-
-    float normalization_factor = 1.0f / (patch_size * patch_size);
-    color_1stmoment *= normalization_factor;
-    color_2ndmoment *= normalization_factor;
-    motion_1stmoment *= normalization_factor;
-    float3 color_var = color_2ndmoment - color_1stmoment * color_1stmoment;
-    const float var_magnitude = 5.0f;
-    float3 color_width = sqrt(color_var) * var_magnitude;
-    //color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
-    //color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
-    
-    float3 blended = curr;
-    if (b_FrameIndex.frameIndex && b_FrameIndex.taaEnabled)
-    {
-        float2 prev_location = i_position.xy - motion_1stmoment.xy * g_View.viewportSize;
-        if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
-        {
-            prev_location /= g_View.viewportSize;
-            float3 prev_normal = normalize(t_NormalBuffer.Sample(s_FrameSampler, prev_location));
-            if (pow(dot(prev_normal, curr_normal), 32) > 0.80f && abs(motion_1stmoment.z) < 0.05f)
-            {
-                float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
-                hist = max(color_lowerbound, hist);
-                hist = min(color_upperbound, hist);
-
-                blended = lerp(curr, hist, 0.9f);
-            }
-        }
-    }
    
-    current_buffer = float4(blended, 1.0f);
-    color_buffer = float4(blended, 1.0f);
+    current_buffer = float4(curr, 1.0f);
+    color_buffer = float4(curr, 1.0f);
 }
