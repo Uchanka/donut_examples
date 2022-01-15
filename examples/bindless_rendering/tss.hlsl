@@ -78,8 +78,8 @@ void vs_main(
 float tentValue(float2 center, float2 position)
 {
     float2 diff = abs(position - center);
-    float contributionX = diff.x > 0.5f ? 0.0f : (1.0f - 2.0f * diff.x);
-    float contributionY = diff.y > 0.5f ? 0.0f : (1.0f - 2.0f * diff.y);
+    float contributionX = (diff.x == 0.0f ? 1.0f : 0.0f);
+    float contributionY = (diff.y == 0.0f ? 1.0f : 0.0f);
     return contributionX * contributionY;
 }
 
@@ -89,8 +89,8 @@ float4 tentSampling(float2 svPosition, Texture2D<float4> sourceTexture)
     float2 pixelOffset = g_View.pixelOffset;
 
     float2 pixelPosition = svPosition + float2(0.5f, 0.5f);
-    float2 pixelPositionJitterSpace = pixelPosition * samplingRate;
-    int2 lowerLeftIndex = int2(floor(pixelPositionJitterSpace.x - 0.5f), floor(pixelPositionJitterSpace.y - 0.5f));
+    float2 pixelPositionJitterSpace = pixelPosition * samplingRate - float2(0.5f, 0.5f);
+    int2 lowerLeftIndex = int2(floor(pixelPositionJitterSpace.x), floor(pixelPositionJitterSpace.y));
     int2 lowerRightIndex = int2(lowerLeftIndex.x + 1, lowerLeftIndex.y);
     int2 upperLeftIndex = int2(lowerLeftIndex.x, lowerLeftIndex.y + 1);
     int2 upperRightIndex = int2(lowerLeftIndex.x + 1, lowerLeftIndex.y + 1);
@@ -100,17 +100,48 @@ float4 tentSampling(float2 svPosition, Texture2D<float4> sourceTexture)
     float4 upperLeftSample = t_JitteredCurrentBuffer[upperLeftIndex];
     float4 upperRightSample = t_JitteredCurrentBuffer[upperRightIndex];
 
-    float2 lowerLeftSamplePositionJitterSpace = float2(float(lowerLeftIndex.x), float(lowerLeftIndex.y)) + float2(0.5f, 0.5f) + pixelOffset;
-    float2 lowerRightSamplePositionJitterSpace = float2(float(lowerRightIndex.x), float(lowerRightIndex.y)) + float2(0.5f, 0.5f) + pixelOffset;
-    float2 upperLeftSamplePositionJitterSpace = float2(float(upperLeftIndex.x), float(upperLeftIndex.y)) + float2(0.5f, 0.5f) + pixelOffset;
-    float2 upperRightSamplePositionJitterSpace = float2(float(upperRightIndex.x), float(upperRightIndex.y)) + float2(0.5f, 0.5f) + pixelOffset;
+    float2 lowerLeftSamplePositionJitterSpace = float2(float(lowerLeftIndex.x), float(lowerLeftIndex.y)) + pixelOffset;
+    float2 lowerRightSamplePositionJitterSpace = float2(float(lowerRightIndex.x), float(lowerRightIndex.y)) + pixelOffset;
+    float2 upperLeftSamplePositionJitterSpace = float2(float(upperLeftIndex.x), float(upperLeftIndex.y)) + pixelOffset;
+    float2 upperRightSamplePositionJitterSpace = float2(float(upperRightIndex.x), float(upperRightIndex.y)) + pixelOffset;
 
     float lowerLeftWeight = tentValue(pixelPositionJitterSpace, lowerLeftSamplePositionJitterSpace);
     float lowerRightWeight = tentValue(pixelPositionJitterSpace, lowerRightSamplePositionJitterSpace);
     float upperLeftWeight = tentValue(pixelPositionJitterSpace, upperLeftSamplePositionJitterSpace);
     float upperRightWeight = tentValue(pixelPositionJitterSpace, upperRightSamplePositionJitterSpace);
 
-    return lowerLeftWeight * lowerLeftSample + lowerRightWeight * lowerRightSample + upperLeftWeight * upperLeftSample + upperRightWeight * upperRightSample;
+    float maximumLeftWeight = max(lowerLeftWeight, upperLeftWeight);
+    float maximumRightWeight = max(lowerRightWeight, upperRightWeight);
+    float maximumWeight = max(maximumLeftWeight, maximumRightWeight);
+
+    if (pixelOffset.x == -0.25f && pixelOffset.y == -0.25f && int(svPosition.x) % 2 == 0 && int(svPosition.y) % 2 == 0)
+    {
+        return float4(lowerLeftSample.xyz, 1.0f);
+    }
+    if (pixelOffset.x == 0.25f && pixelOffset.y == -0.25f && int(svPosition.x) % 2 == 1 && int(svPosition.y) % 2 == 0)
+    {
+        return float4(lowerRightSample.xyz, 1.0f);
+    }
+    if (pixelOffset.x == -0.25f && pixelOffset.y == 0.25f && int(svPosition.x) % 2 == 0 && int(svPosition.y) % 2 == 1)
+    {
+        return float4(upperLeftSample.xyz, 1.0f);
+    }
+    if (pixelOffset.x == 0.25f && pixelOffset.y == 0.25f && int(svPosition.x) % 2 == 1 && int(svPosition.y) % 2 == 1)
+    {
+        return float4(upperRightSample.xyz, 1.0f);
+    }
+    return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    
+    if (maximumWeight != 0.0f)
+    {
+        float normalizationFactor = 1.0f / (lowerLeftWeight + lowerRightWeight + upperLeftWeight + upperRightWeight);
+        float4 result = lowerLeftWeight * lowerLeftSample + lowerRightWeight * lowerRightSample + upperLeftWeight * upperLeftSample + upperRightWeight * upperRightSample;
+        return float4(result.xyz * normalizationFactor, maximumWeight);
+    }
+    else
+    {
+        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
 }
 
 void ps_main(
@@ -185,11 +216,11 @@ void ps_main(
                 //hist = max(color_lowerbound, hist);
                 //hist = min(color_upperbound, hist);
 
-                blended = lerp(hist, curr, 0.1f * maximalConfidence);
+                blended = lerp(hist, curr, maximalConfidence);
             }
         }
     }
-    
+
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
 }
