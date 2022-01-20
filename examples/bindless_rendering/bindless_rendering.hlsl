@@ -122,11 +122,15 @@ void ps_main(
     
     float3 prev_position_clip = i_prev_position.xyz / i_prev_position.w;
     float2 prev_position_screen = float2(prev_position_clip.x * 0.5f + 0.5f, 0.5f - prev_position_clip.y * 0.5f);
+    //float2 prev_position_offset = prev_position_screen.xy - (g_ViewLastFrame.pixelOffset * g_ViewLastFrame.viewportSizeInv);
     
     float3 curr_position_clip = i_curr_position.xyz / i_curr_position.w;
     float2 curr_position_screen = float2(curr_position_clip.x * 0.5f + 0.5f, 0.5f - curr_position_clip.y * 0.5f);
-    motion_vector = float4(curr_position_screen - prev_position_screen, curr_position_clip.z - prev_position_clip.z, 1.0f);
+    //float2 curr_position_offset = curr_position_screen.xy - (g_View.pixelOffset * g_View.viewportSizeInv);
 
+    motion_vector = float4(curr_position_screen - prev_position_screen, curr_position_clip.z - prev_position_clip.z, 1.0f);
+    //motion_vector = float4(curr_position_offset - prev_position_offset, curr_position_clip.z - prev_position_clip.z, 1.0f);
+    
     jittered_sample = float4(diffuse, 1.0f);
     normal_vector = normalize(i_normal_vector);
     prev_normal = normalize(i_prev_normal);
