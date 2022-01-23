@@ -41,6 +41,7 @@ Texture2D<float4> t_HistoryColor : register(t1);
 Texture2D<float4> t_JitteredCurrentBuffer : register(t2);
 Texture2D<float3> t_NormalBuffer : register(t3);
 Texture2D<float3> t_HistoryNormal : register(t4);
+Texture2D<float> t_Coverage : register(t5);
 
 SamplerState s_FrameSampler : register(s0);
 
@@ -75,11 +76,18 @@ void vs_main(
     o_uv_coord = g_uvs[i_vertexID];
 }
 
+float gaussValue(int dx, int dy)
+{
+    float dxContribution = (dx == 0 ? 0.5f : 0.25f);
+    float dyContribution = (dy == 0 ? 0.5f : 0.25f);
+    return dxContribution * dyContribution;
+}
+
 float tentValue(float2 center, float2 position)
 {
     float2 diff = abs(position - center);
-    float contributionX = (diff.x == 0.0f ? 1.0f : 0.0f);
-    float contributionY = (diff.y == 0.0f ? 1.0f : 0.0f);
+    float contributionX = (diff.x > 0.25f ? 0.0f : 1.0f - 4.0f * diff.x);
+    float contributionY = (diff.y > 0.25f ? 0.0f : 1.0f - 4.0f * diff.y);
     return contributionX * contributionY;
 }
 
@@ -88,55 +96,36 @@ float4 tentSampling(float2 svPosition, Texture2D<float4> sourceTexture)
     float samplingRate = g_SamplingRate.samplingRate;
     float2 pixelOffset = g_View.pixelOffset;
 
-    float2 pixelPosition = svPosition + float2(0.5f, 0.5f);
-    float2 pixelPositionJitterSpace = pixelPosition * samplingRate - float2(0.5f, 0.5f);
-    int2 lowerLeftIndex = int2(floor(pixelPositionJitterSpace.x), floor(pixelPositionJitterSpace.y));
-    int2 lowerRightIndex = int2(lowerLeftIndex.x + 1, lowerLeftIndex.y);
-    int2 upperLeftIndex = int2(lowerLeftIndex.x, lowerLeftIndex.y + 1);
-    int2 upperRightIndex = int2(lowerLeftIndex.x + 1, lowerLeftIndex.y + 1);
+    float2 pixelPosition = svPosition;
+    float2 pixelPositionJitterSpace = pixelPosition * samplingRate;
+    int2 closestJitterCellIndex = int2(floor(pixelPositionJitterSpace.x), floor(pixelPositionJitterSpace.y));
+    float2 closestJitterSamplePosition = float2(closestJitterCellIndex.x, closestJitterCellIndex.y) + float2(0.5f, 0.5f) + pixelOffset;
 
-    float4 lowerLeftSample = t_JitteredCurrentBuffer[lowerLeftIndex];
-    float4 lowerRightSample = t_JitteredCurrentBuffer[lowerRightIndex];
-    float4 upperLeftSample = t_JitteredCurrentBuffer[upperLeftIndex];
-    float4 upperRightSample = t_JitteredCurrentBuffer[upperRightIndex];
-
-    float2 lowerLeftSamplePositionJitterSpace = float2(float(lowerLeftIndex.x), float(lowerLeftIndex.y)) + pixelOffset;
-    float2 lowerRightSamplePositionJitterSpace = float2(float(lowerRightIndex.x), float(lowerRightIndex.y)) + pixelOffset;
-    float2 upperLeftSamplePositionJitterSpace = float2(float(upperLeftIndex.x), float(upperLeftIndex.y)) + pixelOffset;
-    float2 upperRightSamplePositionJitterSpace = float2(float(upperRightIndex.x), float(upperRightIndex.y)) + pixelOffset;
-
-    float lowerLeftWeight = tentValue(pixelPositionJitterSpace, lowerLeftSamplePositionJitterSpace);
-    float lowerRightWeight = tentValue(pixelPositionJitterSpace, lowerRightSamplePositionJitterSpace);
-    float upperLeftWeight = tentValue(pixelPositionJitterSpace, upperLeftSamplePositionJitterSpace);
-    float upperRightWeight = tentValue(pixelPositionJitterSpace, upperRightSamplePositionJitterSpace);
-
-    float maximumLeftWeight = max(lowerLeftWeight, upperLeftWeight);
-    float maximumRightWeight = max(lowerRightWeight, upperRightWeight);
-    float maximumWeight = max(maximumLeftWeight, maximumRightWeight);
-
-    if (pixelOffset.x == -0.25f && pixelOffset.y == -0.25f && int(svPosition.x) % 2 == 0 && int(svPosition.y) % 2 == 0)
+    float normalizationFactor = 0.0f;
+    float maximalWeight = 0.0f;
+    float3 collectedSample = float3(0.0f, 0.0f, 0.0f);
+    const int patch_size = 3;
+    [unroll]
+    for (int dy = -(patch_size / 2); dy <= (patch_size / 2); ++dy)
     {
-        return float4(lowerLeftSample.xyz, 1.0f);
+        for (int dx = -(patch_size / 2); dx <= (patch_size / 2); ++dx)
+        {
+            float2 jitterSamplePosition = float2(dx, dy) + closestJitterSamplePosition;
+            //float sampleWeight = tentValue(pixelPositionJitterSpace, jitterSamplePosition);
+            float sampleWeight = gaussValue(dx, dy);
+            normalizationFactor += sampleWeight;
+            maximalWeight = max(maximalWeight, sampleWeight);
+
+            float2 jitterTextureCoordinate = jitterSamplePosition * g_View.viewportSizeInv * (1.0f / samplingRate);
+            float3 jitterSample = sourceTexture.Sample(s_FrameSampler, jitterTextureCoordinate).xyz;
+            collectedSample += sampleWeight * jitterSample;
+        }
     }
-    if (pixelOffset.x == 0.25f && pixelOffset.y == -0.25f && int(svPosition.x) % 2 == 1 && int(svPosition.y) % 2 == 0)
-    {
-        return float4(lowerRightSample.xyz, 1.0f);
-    }
-    if (pixelOffset.x == -0.25f && pixelOffset.y == 0.25f && int(svPosition.x) % 2 == 0 && int(svPosition.y) % 2 == 1)
-    {
-        return float4(upperLeftSample.xyz, 1.0f);
-    }
-    if (pixelOffset.x == 0.25f && pixelOffset.y == 0.25f && int(svPosition.x) % 2 == 1 && int(svPosition.y) % 2 == 1)
-    {
-        return float4(upperRightSample.xyz, 1.0f);
-    }
-    return float4(0.0f, 0.0f, 0.0f, 0.0f);
     
-    if (maximumWeight != 0.0f)
+    if (maximalWeight != 0.0f)
     {
-        float normalizationFactor = 1.0f / (lowerLeftWeight + lowerRightWeight + upperLeftWeight + upperRightWeight);
-        float4 result = lowerLeftWeight * lowerLeftSample + lowerRightWeight * lowerRightSample + upperLeftWeight * upperLeftSample + upperRightWeight * upperRightSample;
-        return float4(result.xyz * normalizationFactor, maximumWeight);
+        normalizationFactor = 1.0f / normalizationFactor;
+        return float4(collectedSample.xyz * normalizationFactor, maximalWeight);
     }
     else
     {
@@ -163,13 +152,6 @@ void ps_main(
         maximalConfidence = tent_result.w;
     }
 
-    float3 curr_normal = t_NormalBuffer.Sample(s_FrameSampler, i_position.xy * g_View.viewportSizeInv);
-
-    float3 color_1stmoment = float3(0.0f, 0.0f, 0.0f);
-    float3 color_2ndmoment = float3(0.0f, 0.0f, 0.0f);
-    float3 color_lowerbound = float3(1.0f, 1.0f, 1.0f);
-    float3 color_upperbound = float3(0.0f, 0.0f, 0.0f);
-
     float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
     const int patch_size = 3;
     [unroll]
@@ -177,29 +159,16 @@ void ps_main(
     {
         for (int dx = -(patch_size / 2); dx <= (patch_size / 2); ++dx)
         {
-            int2 probing_index = i_position.xy + int2(dx, dy);
+            float2 probing_index = i_position.xy + float2(dx, dy);
             probing_index = clamp(probing_index, int2(0, 0), g_View.viewportOrigin + g_View.viewportSize);
-            float3 proximity_color = t_JitteredCurrentBuffer.Sample(s_FrameSampler, probing_index * g_View.viewportSizeInv).xyz;
             float3 proximity_motion = t_MotionVector.Sample(s_FrameSampler, probing_index * g_View.viewportSizeInv).xyz;
-
-            color_1stmoment += proximity_color;
-            color_2ndmoment += proximity_color * proximity_color;
-            color_lowerbound = min(proximity_color, color_lowerbound);
-            color_upperbound = max(proximity_color, color_upperbound);
 
             motion_1stmoment += proximity_motion;
         }
     }
 
     const float normalization_factor = 1.0f / (patch_size * patch_size);
-    color_1stmoment *= normalization_factor;
-    color_2ndmoment *= normalization_factor;
     motion_1stmoment *= normalization_factor;
-    float3 color_var = color_2ndmoment - color_1stmoment * color_1stmoment;
-    const float var_magnitude = 5.0f;
-    float3 color_width = sqrt(color_var) * var_magnitude;
-    //color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
-    //color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
     
     float3 blended = curr;
     if (b_FrameIndex.frameHasReset == 0 && b_FrameIndex.currentAAMode == 2)
@@ -208,19 +177,21 @@ void ps_main(
         if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
         {
             prev_location *= g_View.viewportSizeInv;
-            float3 prev_normal = normalize(t_NormalBuffer.Sample(s_FrameSampler, prev_location));
-            //if (pow(dot(prev_normal, curr_normal), 32) > 0.80f && abs(motion_1stmoment.z) < 0.05f)
-            {
-                float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
-                //float3 hist = tentSampling(prev_location, t_HistoryColor);
-                //hist = max(color_lowerbound, hist);
-                //hist = min(color_upperbound, hist);
-
-                blended = lerp(hist, curr, maximalConfidence);
-            }
+            float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
+            float alphaConfidence = 0.9f * maximalConfidence;
+            blended = (1.0f - alphaConfidence) * hist + alphaConfidence * curr;
         }
     }
 
-    current_buffer = float4(blended, 1.0f);
-    color_buffer = float4(blended, 1.0f);
+    float isCovered = t_Coverage[int2(floor(i_position.x), floor(i_position.y))];
+    if (isCovered == 0.0f)
+    {
+        current_buffer = float4(curr, 1.0f);
+        color_buffer = float4(curr, 1.0f);
+    }
+    else
+    {
+        current_buffer = float4(blended, 1.0f);
+        color_buffer = float4(blended, 1.0f);
+    }
 }

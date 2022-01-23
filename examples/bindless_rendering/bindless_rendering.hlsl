@@ -43,10 +43,13 @@ struct InstanceConstants
 ConstantBuffer<PlanarViewConstants> g_View : register(b0);
 ConstantBuffer<PlanarViewConstants> g_ViewLastFrame : register(b1);
 VK_PUSH_CONSTANT ConstantBuffer<InstanceConstants> g_Instance : register(b2);
+ConstantBuffer<SamplingRateWrapper> g_SamplingRate : register(b3);
 
 StructuredBuffer<InstanceData> t_InstanceData : register(t0);
 StructuredBuffer<GeometryData> t_GeometryData : register(t1);
 StructuredBuffer<MaterialConstants> t_MaterialConstants : register(t2);
+
+RWTexture2D<float> t_Coverage : register(u0);
 
 SamplerState s_MaterialSampler : register(s0);
 
@@ -120,6 +123,10 @@ void ps_main(
         diffuse *= diffuseTextureValue.rgb;
     }
     
+    float2 rescaledSamplePosition = (i_position.xy + g_View.pixelOffset) * (1.0f / g_SamplingRate.samplingRate);
+    int2 highresIndex = int2(floor(rescaledSamplePosition.x), floor(rescaledSamplePosition.y));
+    t_Coverage[highresIndex] = 1.0f;
+
     float3 prev_position_clip = i_prev_position.xyz / i_prev_position.w;
     float2 prev_position_screen = float2(prev_position_clip.x * 0.5f + 0.5f, 0.5f - prev_position_clip.y * 0.5f);
     //float2 prev_position_offset = prev_position_screen.xy - (g_ViewLastFrame.pixelOffset * g_ViewLastFrame.viewportSizeInv);

@@ -90,6 +90,8 @@ private:
     nvrhi::TextureHandle m_SSNormalBuffer;
     nvrhi::TextureHandle m_SSHistoryNormal;
     nvrhi::TextureHandle m_SSMotionVector;
+
+    nvrhi::TextureHandle m_UpdateCoverage;
     
     //Low-res
     nvrhi::TextureHandle m_JitteredColor;
@@ -240,7 +242,23 @@ public:
             }
         }
 
-        GetDeviceManager()->SetInformativeWindowTitle(g_WindowTitle);
+        std::string extraInfo = "CURRENT MODE: ";
+        switch (m_currentAAMode)
+        {
+        case TSS:
+            extraInfo += "TSS";
+            break;
+        case NATIVE_RESOLUTION:
+            extraInfo += "NATIVE";
+            break;
+        case UPSAMPLED:
+            extraInfo += "UPSAMPLED";
+            break;
+        default:
+            break;
+        }
+
+        GetDeviceManager()->SetInformativeWindowTitle(g_WindowTitle, extraInfo.c_str());
     }
 
     void BackBufferResizing() override
@@ -256,6 +274,7 @@ public:
         m_SSNormalBuffer = nullptr;
         m_SSHistoryNormal = nullptr;
         m_NormalBuffer = nullptr;
+        m_UpdateCoverage = nullptr;
 
         m_TSSFramebuffer = nullptr;
         m_RenderFramebuffer = nullptr;
@@ -373,6 +392,10 @@ public:
             textureDescHighRes.debugName = "SupersampledMotionVector";
             m_SSMotionVector = GetDevice()->createTexture(textureDescHighRes);
 
+            textureDescHighRes.format = nvrhi::Format::R16_FLOAT;
+            textureDescHighRes.debugName = "Coverage";
+            m_UpdateCoverage = GetDevice()->createTexture(textureDescHighRes);
+
             //Low-res texture
             nvrhi::TextureDesc textureDescLowRes;
             textureDescLowRes.format = nvrhi::Format::SRGBA8_UNORM;
@@ -429,9 +452,11 @@ public:
                 nvrhi::BindingSetItem::ConstantBuffer(0, m_ThisFrameViewConstants),
                 nvrhi::BindingSetItem::ConstantBuffer(1, m_LastFrameViewConstants),
                 nvrhi::BindingSetItem::PushConstants(2, sizeof(int2)),
+                nvrhi::BindingSetItem::ConstantBuffer(3, m_SamplingRate),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_Scene->GetInstanceBuffer()),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_Scene->GetGeometryBuffer()),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_Scene->GetMaterialBuffer()),
+                nvrhi::BindingSetItem::Texture_UAV(0, m_UpdateCoverage),
                 nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler)
             };
             nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDesc, m_RenderBindingLayout, m_RenderBindingSet);
@@ -458,6 +483,7 @@ public:
                 nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredColor, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(3, m_NormalBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(4, m_HistoryNormal, nvrhi::Format::SRGBA8_UNORM),
+                nvrhi::BindingSetItem::Texture_SRV(5, m_UpdateCoverage, nvrhi::Format::R16_FLOAT),
                 nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
             };
             nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescPost, m_TSSBindingLayout, m_TSSBindingSet);
@@ -503,6 +529,7 @@ public:
         }
         m_View.FillPlanarViewConstants(viewConstants);
         m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
+        m_CommandList->writeBuffer(m_SamplingRate, &m_slidingSamplingRate, sizeof(m_slidingSamplingRate));
 
         nvrhi::GraphicsState state;
         state.pipeline = m_RenderPipeline;
@@ -571,6 +598,7 @@ public:
         m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_UpdateCoverage, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_JitteredColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_SSColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_NormalBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
