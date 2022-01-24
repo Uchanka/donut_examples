@@ -458,7 +458,7 @@ public:
                 nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredColor, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(3, m_NormalBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(4, m_HistoryNormal, nvrhi::Format::SRGBA8_UNORM),
-                nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
+                nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler)
             };
             nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescPost, m_TSSBindingLayout, m_TSSBindingSet);
 
@@ -551,6 +551,11 @@ public:
         int2 frameStatus = int2(frameHasBeenReset, m_currentAAMode);
         m_CommandList->setPushConstants(&frameStatus, sizeof(frameStatus));
         
+        if (frameHasBeenReset == 1)
+        {
+            m_CommandList->clearTextureFloat(m_HistoryColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        }
+
         nvrhi::DrawArguments argsPost;
         argsPost.vertexCount = 6;
         m_CommandList->draw(argsPost);
@@ -558,14 +563,8 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
 
         m_CommandList->open();
-        if (frameHasBeenReset == 1)
-        {
-            m_CommandList->clearTextureFloat(m_HistoryColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        }
-        else
-        {
-            m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
-        }
+        
+        m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
 
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
         m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
