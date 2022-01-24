@@ -331,6 +331,7 @@ public:
         case UPSAMPLED:
             return float2(.0f);*/
         case TEMPORAL_SUPERSAMPLING:
+            //return fixedMSAA16XPosition[frameIndex % (sizeof(fixedMSAA16XPosition) / sizeof(fixedMSAA16XPosition[0]))];
             return fixedMSAA4XPosition[frameIndex % (sizeof(fixedMSAA4XPosition) / sizeof(fixedMSAA4XPosition[0]))];
             //return float2(VanDerCorputSequence(clampedIndex, 2), VanDerCorputSequence(clampedIndex, 3));
         default:

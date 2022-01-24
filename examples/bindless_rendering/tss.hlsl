@@ -100,7 +100,7 @@ float4 upsamplingJitter(float2 svPosition, Texture2D<float4> sourceTexture)
         for (int dx = -(patchSize / 2); dx <= (patchSize / 2); ++dx)
         {
             float2 probedSampleLocation = closestJitterLocation + float2(float(dx), float(dy));
-            float4 probedSample = t_JitteredCurrentBuffer.Sample(s_FrameSampler, probedSampleLocation * (1.0f / samplingRate) * g_View.viewportSizeInv);
+            float4 probedSample = t_JitteredCurrentBuffer[int2(floor(probedSampleLocation.x), floor(probedSampleLocation.y))];
             float probedWeight = tentValue(pixelCenterLocation, probedSampleLocation);
             maximumWeight = max(maximumWeight, probedWeight);
             normalizationFactor += probedWeight;
