@@ -43,7 +43,7 @@ using namespace donut::math;
 
 static const char* g_WindowTitle = "Donut Example: Bindless Rendering";
 
-static enum AAMode { NATIVE_RESOLUTION, UPSAMPLED, TSS, PLACE_HOLDER };
+static enum AAMode { NATIVE_RESOLUTION, RAW_UPSCALED, TEMPORAL_SUPERSAMPLING, TEMPORAL_ANTIALIASING, PLACE_HOLDER };
 
 class BindlessRendering : public app::ApplicationBase
 {
@@ -112,7 +112,7 @@ private:
     engine::PlanarView m_View;
     
     bool m_EnableAnimations = true;
-    int m_currentAAMode = TSS;
+    int m_currentAAMode = TEMPORAL_SUPERSAMPLING;
     float m_slidingSamplingRate = 0.5f;
     float m_WallclockTime = 0.f;
 
@@ -240,7 +240,26 @@ public:
             }
         }
 
-        GetDeviceManager()->SetInformativeWindowTitle(g_WindowTitle);
+        std::string extraInfoOnAAMode = "Current AA Mode: ";
+        switch (m_currentAAMode)
+        {
+        case NATIVE_RESOLUTION:
+            extraInfoOnAAMode += " NATIVE";
+            break;
+        case RAW_UPSCALED:
+            extraInfoOnAAMode += " UPSCALED";
+            break;
+        case TEMPORAL_SUPERSAMPLING:
+            extraInfoOnAAMode += " TSS";
+            break;
+        case TEMPORAL_ANTIALIASING:
+            extraInfoOnAAMode += " TAA";
+            break;
+        default:
+            break;
+        }
+
+        GetDeviceManager()->SetInformativeWindowTitle(g_WindowTitle, extraInfoOnAAMode.c_str());
     }
 
     void BackBufferResizing() override
@@ -292,7 +311,18 @@ public:
 
     float2 GetCurrentFramePixelOffset(const int frameIndex)
     {
-        float2 fixedMSAAPosition[4] = { float2(-0.25f, -0.25f), float2(-0.25f, 0.25f), float2(0.25f, -0.25f), float2(0.25f, 0.25f) };
+        float2 fixedMSAA4XPosition[4] = 
+        { 
+            float2(-0.25f, -0.25f), float2(-0.25f, 0.25f), float2(0.25f, -0.25f), float2(0.25f, 0.25f)
+        };
+        float2 fixedMSAA16XPosition[16] = 
+        { 
+            float2(-0.375f, -0.375f), float2(-0.125f, -0.375f), float2(0.125f, -0.375f), float2(0.375f, -0.375f),
+            float2(-0.375f, -0.125f), float2(-0.125f, -0.125f), float2(0.125f, -0.125f), float2(0.375f, -0.125f),
+            float2(-0.375f, 0.125f), float2(-0.125f, 0.125f), float2(0.125f, 0.125f), float2(0.375f, 0.125f),
+            float2(-0.375f, 0.375f), float2(-0.125f, 0.375f), float2(0.125f, 0.375f), float2(0.375f, 0.375f)
+        };
+
         int clampedIndex = frameIndex % 16 + 1;
         switch (m_currentAAMode)
         {
@@ -300,8 +330,8 @@ public:
             return float2(.0f);
         case UPSAMPLED:
             return float2(.0f);*/
-        case TSS:
-            return fixedMSAAPosition[frameIndex % (sizeof(fixedMSAAPosition) / sizeof(fixedMSAAPosition[0]))];
+        case TEMPORAL_SUPERSAMPLING:
+            return fixedMSAA4XPosition[frameIndex % (sizeof(fixedMSAA4XPosition) / sizeof(fixedMSAA4XPosition[0]))];
             //return float2(VanDerCorputSequence(clampedIndex, 2), VanDerCorputSequence(clampedIndex, 3));
         default:
             return float2(.0f);
@@ -311,29 +341,14 @@ public:
     void Render(nvrhi::IFramebuffer* framebuffer) override
     {
         const auto& fbinfo = framebuffer->getFramebufferInfo();
-        uint32_t upsampledWidth, upsampledHeight, renderWidth, renderHeight;
-        switch (m_currentAAMode)
+        uint32_t upsampledWidth = fbinfo.width;
+        uint32_t upsampledHeight = fbinfo.height;
+        uint32_t renderWidth = upsampledWidth;
+        uint32_t renderHeight = upsampledHeight;
+        if (m_currentAAMode != NATIVE_RESOLUTION)
         {
-        case NATIVE_RESOLUTION:
-            upsampledWidth = fbinfo.width;
-            upsampledHeight = fbinfo.height;
-            renderWidth = upsampledWidth;
-            renderHeight = upsampledHeight;
-            break;
-        case UPSAMPLED:
-            upsampledWidth = fbinfo.width;
-            upsampledHeight = fbinfo.height;
-            renderWidth = upsampledWidth * m_slidingSamplingRate;
-            renderHeight = upsampledHeight * m_slidingSamplingRate;
-            break;
-        case TSS:
-            upsampledWidth = fbinfo.width;
-            upsampledHeight = fbinfo.height;
-            renderWidth = upsampledWidth * m_slidingSamplingRate;
-            renderHeight = upsampledHeight * m_slidingSamplingRate;
-            break;
-        default:
-            break;
+            renderWidth *= m_slidingSamplingRate;
+            renderHeight *= m_slidingSamplingRate;
         }
 
         int frameHasBeenReset = 0;
@@ -483,7 +498,7 @@ public:
             m_CommandList->writeBuffer(m_LastFrameViewConstants, &viewConstants, sizeof(viewConstants));
         }
 
-        if (m_currentAAMode == TSS)
+        if (m_currentAAMode == TEMPORAL_SUPERSAMPLING)
         {
             m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
         }
@@ -551,6 +566,11 @@ public:
         int2 frameStatus = int2(frameHasBeenReset, m_currentAAMode);
         m_CommandList->setPushConstants(&frameStatus, sizeof(frameStatus));
         
+        if (frameHasBeenReset == 1)
+        {
+            m_CommandList->clearTextureFloat(m_HistoryColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        }
+
         nvrhi::DrawArguments argsPost;
         argsPost.vertexCount = 6;
         m_CommandList->draw(argsPost);
@@ -558,15 +578,8 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
 
         m_CommandList->open();
-        if (frameHasBeenReset == 1)
-        {
-            m_CommandList->clearTextureFloat(m_HistoryColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        }
-        else
-        {
-            m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
-        }
-
+        m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
+        
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
         m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
