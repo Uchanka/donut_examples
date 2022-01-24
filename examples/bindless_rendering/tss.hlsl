@@ -83,9 +83,8 @@ float tentValue(float2 center, float2 position)
     return contributionX * contributionY;
 }
 
-float4 upsamplingJitter(float2 svPosition, Texture2D<float4> sourceTexture)
+float4 upsamplingJitter(float2 svPosition, float samplingRate, Texture2D<float4> sourceTexture)
 {
-    float samplingRate = g_SamplingRate.samplingRate;
     float2 pixelOffset = g_View.pixelOffset;
     float2 pixelCenterLocation = svPosition * samplingRate;
     float2 closestJitterLocation = float2(floor(pixelCenterLocation.x), floor(pixelCenterLocation.y)) + float2(0.5f, 0.5f) - pixelOffset;
@@ -125,16 +124,22 @@ void ps_main(
     out float4 color_buffer : SV_Target0,
     out float4 current_buffer : SV_Target1)
 {
-    float maximalConfidence = 1.0f;
-    float3 curr = float3(0.0f, 0.0f, 0.0f);
+    const int nativeResolution = 0;
+    const int rawUpscaled = 1;
     const int temporalSupersamplingAA = 2;
+    const int temporalAntiAliasingAA = 3;
+
+    float maximalConfidence;
+    float3 curr = float3(0.0f, 0.0f, 0.0f);
+    float samplingRate = (b_FrameIndex.currentAAMode == 0 ? 1.0f : g_SamplingRate.samplingRate);
     if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
     {
-        curr = t_JitteredCurrentBuffer.Sample(s_FrameSampler, i_position.xy * g_View.viewportSizeInv).xyz;
+        curr = t_JitteredCurrentBuffer[int2(floor(i_position.x * samplingRate), floor(i_position.y * samplingRate))].xyz;
+        maximalConfidence = 1.0f;
     }
     else
     {
-        float4 upsampledJitter = upsamplingJitter(i_position.xy, t_JitteredCurrentBuffer);
+        float4 upsampledJitter = upsamplingJitter(i_position.xy, samplingRate, t_JitteredCurrentBuffer);
         curr = upsampledJitter.xyz;
         maximalConfidence = upsampledJitter.w;
     }
@@ -176,24 +181,39 @@ void ps_main(
     float3 color_width = sqrt(color_var) * var_magnitude;
     color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
     color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
+
+    float2 prev_location = i_position.xy - motion_1stmoment.xy * g_View.viewportSize;
+    prev_location *= g_View.viewportSizeInv;
+    float3 prev_normal = normalize(t_NormalBuffer.Sample(s_FrameSampler, prev_location));
     
     float3 blended = curr;
-    if (b_FrameIndex.frameHasReset == 0 && b_FrameIndex.currentAAMode == temporalSupersamplingAA)
+    float blendAlpha = 1.0f;
+    switch (b_FrameIndex.currentAAMode)
     {
-        float2 prev_location = i_position.xy - motion_1stmoment.xy * g_View.viewportSize;
+    case nativeResolution:
+        blendAlpha = 1.0f;
+        break;
+    case rawUpscaled:
+        blendAlpha = 1.0f;
+        break;
+    case temporalSupersamplingAA:
+        blendAlpha = maximalConfidence * 0.4f;
+        break;
+    case temporalAntiAliasingAA:
+        blendAlpha = maximalConfidence * 0.1f;
+        break;
+    }
+    if (b_FrameIndex.frameHasReset == 0)
+    {
+        
         if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
         {
-            prev_location *= g_View.viewportSizeInv;
-            float3 prev_normal = normalize(t_NormalBuffer.Sample(s_FrameSampler, prev_location));
-            //if (pow(dot(prev_normal, curr_normal), 32) > 0.80f && abs(motion_1stmoment.z) < 0.05f)
-            {
-                float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
-                //float3 hist = tentSampling(prev_location, t_HistoryColor);
-                //hist = max(color_lowerbound, hist);
-                //hist = min(color_upperbound, hist);
+            float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
+            //float3 hist = tentSampling(prev_location, t_HistoryColor);
+            //hist = max(color_lowerbound, hist);
+            //hist = min(color_upperbound, hist);
 
-                blended = lerp(hist, curr, maximalConfidence);
-            }
+            blended = lerp(hist, curr, blendAlpha);
         }
     }
 
