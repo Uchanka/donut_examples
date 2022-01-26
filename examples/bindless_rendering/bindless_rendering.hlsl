@@ -42,7 +42,9 @@ struct InstanceConstants
 
 ConstantBuffer<PlanarViewConstants> g_View : register(b0);
 ConstantBuffer<PlanarViewConstants> g_ViewLastFrame : register(b1);
-VK_PUSH_CONSTANT ConstantBuffer<InstanceConstants> g_Instance : register(b2);
+ConstantBuffer<SamplingRateWrapper> g_SamplingRate : register(b2);
+ConstantBuffer<FrameIndexConstant> b_FrameIndex : register(b3);
+VK_PUSH_CONSTANT ConstantBuffer<InstanceConstants> g_Instance : register(b4);
 
 StructuredBuffer<InstanceData> t_InstanceData : register(t0);
 StructuredBuffer<GeometryData> t_GeometryData : register(t1);
@@ -104,6 +106,11 @@ void ps_main(
     out float3 prev_normal : SV_Target2,
     out float4 motion_vector : SV_Target3)
 {
+    const int nativeResolution = 0;
+    const int rawUpscaled = 1;
+    const int temporalSupersamplingAA = 2;
+    const int temporalAntiAliasingAA = 3;
+
     MaterialConstants material = t_MaterialConstants[i_material];
 
     float3 diffuse = material.baseOrDiffuseColor;
@@ -112,7 +119,13 @@ void ps_main(
     {
         Texture2D diffuseTexture = t_BindlessTextures[material.baseOrDiffuseTextureIndex];
 
-        float4 diffuseTextureValue = diffuseTexture.Sample(s_MaterialSampler, i_uv);
+        float textureLODBias = 0.0f;
+        if (b_FrameIndex.currentAAMode == temporalSupersamplingAA)
+        {
+            float samplingRate = g_SamplingRate.samplingRate;
+            textureLODBias = log2(textureLODBias);
+        }
+        float4 diffuseTextureValue = diffuseTexture.SampleBias(s_MaterialSampler, i_uv, textureLODBias);
         
         if (material.domain == MaterialDomain_AlphaTested)
             clip(diffuseTextureValue.a - material.alphaCutoff);

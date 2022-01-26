@@ -131,7 +131,7 @@ void ps_main(
 
     float maximalConfidence;
     float3 curr = float3(0.0f, 0.0f, 0.0f);
-    float samplingRate = (b_FrameIndex.currentAAMode == 0 ? 1.0f : g_SamplingRate.samplingRate);
+    float samplingRate = (b_FrameIndex.currentAAMode == nativeResolution ? 1.0f : g_SamplingRate.samplingRate);
     if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
     {
         curr = t_JitteredCurrentBuffer[int2(floor(i_position.x * samplingRate), floor(i_position.y * samplingRate))].xyz;

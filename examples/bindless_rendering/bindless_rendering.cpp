@@ -113,7 +113,7 @@ private:
     
     bool m_EnableAnimations = true;
     int m_currentAAMode = TEMPORAL_SUPERSAMPLING;
-    float m_slidingSamplingRate = 0.5f;
+    float m_slidingSamplingRate = 0.25f;
     float m_WallclockTime = 0.f;
 
 public:
@@ -204,6 +204,10 @@ public:
             m_currentAAMode = (m_currentAAMode + 1) % PLACE_HOLDER;
             BackBufferResizing();
             return true;
+        }
+        if (key == GLFW_KEY_0 && action == GLFW_PRESS)
+        {
+
         }
 
         return true;
@@ -326,10 +330,10 @@ public:
         int clampedIndex = frameIndex % 16 + 1;
         switch (m_currentAAMode)
         {
-        /*case NATIVE_RESOLUTION:
+        case NATIVE_RESOLUTION:
             return float2(.0f);
-        case UPSAMPLED:
-            return float2(.0f);*/
+        case RAW_UPSCALED:
+            return float2(.0f);
         case TEMPORAL_SUPERSAMPLING:
             //return fixedMSAA16XPosition[frameIndex % (sizeof(fixedMSAA16XPosition) / sizeof(fixedMSAA16XPosition[0]))];
             //return fixedMSAA4XPosition[frameIndex % (sizeof(fixedMSAA4XPosition) / sizeof(fixedMSAA4XPosition[0]))];
@@ -446,7 +450,9 @@ public:
             bindingSetDesc.bindings = {
                 nvrhi::BindingSetItem::ConstantBuffer(0, m_ThisFrameViewConstants),
                 nvrhi::BindingSetItem::ConstantBuffer(1, m_LastFrameViewConstants),
-                nvrhi::BindingSetItem::PushConstants(2, sizeof(int2)),
+                nvrhi::BindingSetItem::ConstantBuffer(2, m_SamplingRate),
+                nvrhi::BindingSetItem::ConstantBuffer(3, m_FrameIndex),
+                nvrhi::BindingSetItem::PushConstants(4, sizeof(int2)),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_Scene->GetInstanceBuffer()),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_Scene->GetGeometryBuffer()),
                 nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_Scene->GetMaterialBuffer()),
@@ -501,10 +507,7 @@ public:
             m_CommandList->writeBuffer(m_LastFrameViewConstants, &viewConstants, sizeof(viewConstants));
         }
 
-        if (m_currentAAMode == TEMPORAL_SUPERSAMPLING || m_currentAAMode == TEMPORAL_ANTIALIASING)
-        {
-            m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
-        }
+        m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
         nvrhi::Viewport windowViewport(static_cast<float>(renderWidth), static_cast<float>(renderHeight));
         m_View.SetViewport(windowViewport);
         m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewport.width() / windowViewport.height(), 0.1f));
@@ -521,6 +524,10 @@ public:
         }
         m_View.FillPlanarViewConstants(viewConstants);
         m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
+        m_CommandList->writeBuffer(m_SamplingRate, &m_slidingSamplingRate, sizeof(m_slidingSamplingRate));
+
+        int2 frameStatus = int2(frameHasBeenReset, m_currentAAMode);
+        m_CommandList->writeBuffer(m_FrameIndex, &frameStatus, sizeof(frameStatus));
 
         nvrhi::GraphicsState state;
         state.pipeline = m_RenderPipeline;
@@ -566,7 +573,6 @@ public:
         statePost.viewport = m_View.GetViewportState();
         m_CommandList->setGraphicsState(statePost);
 
-        int2 frameStatus = int2(frameHasBeenReset, m_currentAAMode);
         m_CommandList->setPushConstants(&frameStatus, sizeof(frameStatus));
         
         if (frameHasBeenReset == 1)
