@@ -101,6 +101,7 @@ float4 upsamplingJitter(float2 svPosition, float samplingRate, Texture2D<float4>
             float2 probedSampleLocation = closestJitterLocation + float2(float(dx), float(dy));
             float4 probedSample = t_JitteredCurrentBuffer[int2(floor(probedSampleLocation.x), floor(probedSampleLocation.y))];
             float probedWeight = tentValue(pixelCenterLocation, probedSampleLocation);
+            //float probedWeight = 1.0f;
             maximumWeight = max(maximumWeight, probedWeight);
             normalizationFactor += probedWeight;
             collectedSample += probedWeight * probedSample;
@@ -217,6 +218,7 @@ void ps_main(
         }
     }
 
+    //blended = float3(maximalConfidence, maximalConfidence, maximalConfidence);
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
 }
