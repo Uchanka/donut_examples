@@ -42,7 +42,9 @@ Texture2D<float4> t_JitteredCurrentBuffer : register(t2);
 Texture2D<float3> t_NormalBuffer : register(t3);
 Texture2D<float3> t_HistoryNormal : register(t4);
 
-SamplerState s_FrameSampler : register(s0);
+SamplerState s_AnistropicSampler : register(s0);
+SamplerState s_LinearSampler : register(s1);
+SamplerState s_NearestSampler : register(s2);
 
 static const float2 g_positions[] =
 {
@@ -87,7 +89,7 @@ float4 upsamplingJitter(float2 svPosition, float samplingRate, Texture2D<float4>
 {
     float2 pixelOffset = g_View.pixelOffset;
     float2 pixelCenterLocation = svPosition * samplingRate;
-    float2 closestJitterLocation = float2(floor(pixelCenterLocation.x), floor(pixelCenterLocation.y)) + float2(0.5f, 0.5f) - pixelOffset;
+    float2 closestJitterLocation = pixelCenterLocation + pixelOffset;
     
     const int patchSize = 3;
     float maximumWeight = 0.0f;
@@ -99,9 +101,8 @@ float4 upsamplingJitter(float2 svPosition, float samplingRate, Texture2D<float4>
         for (int dx = -(patchSize / 2); dx <= (patchSize / 2); ++dx)
         {
             float2 probedSampleLocation = closestJitterLocation + float2(float(dx), float(dy));
-            float4 probedSample = t_JitteredCurrentBuffer[int2(floor(probedSampleLocation.x), floor(probedSampleLocation.y))];
+            float4 probedSample = t_JitteredCurrentBuffer.Sample(s_LinearSampler, probedSampleLocation * (1.0f / samplingRate) * g_View.viewportSizeInv);
             float probedWeight = tentValue(pixelCenterLocation, probedSampleLocation);
-            //float probedWeight = 1.0f;
             maximumWeight = max(maximumWeight, probedWeight);
             normalizationFactor += probedWeight;
             collectedSample += probedWeight * probedSample;
@@ -145,7 +146,7 @@ void ps_main(
         maximalConfidence = upsampledJitter.w;
     }
 
-    float3 curr_normal = t_NormalBuffer.Sample(s_FrameSampler, i_position.xy * g_View.viewportSizeInv);
+    float3 curr_normal = t_NormalBuffer.Sample(s_LinearSampler, i_position.xy * g_View.viewportSizeInv);
 
     float3 color_1stmoment = float3(0.0f, 0.0f, 0.0f);
     float3 color_2ndmoment = float3(0.0f, 0.0f, 0.0f);
@@ -159,10 +160,10 @@ void ps_main(
     {
         for (int dx = -(patch_size / 2); dx <= (patch_size / 2); ++dx)
         {
-            int2 probing_index = i_position.xy + int2(dx, dy);
-            probing_index = clamp(probing_index, int2(0, 0), g_View.viewportOrigin + g_View.viewportSize);
-            float3 proximity_color = t_JitteredCurrentBuffer.Sample(s_FrameSampler, probing_index * g_View.viewportSizeInv).xyz;
-            float3 proximity_motion = t_MotionVector.Sample(s_FrameSampler, probing_index * g_View.viewportSizeInv).xyz;
+            float2 probing_index = i_position.xy + float2(dx, dy);
+            probing_index = clamp(probing_index, float2(0.0f, 0.0f), g_View.viewportOrigin + g_View.viewportSize) + g_View.pixelOffset * (1.0f / samplingRate);
+            float3 proximity_color = t_JitteredCurrentBuffer.Sample(s_LinearSampler, probing_index * g_View.viewportSizeInv).xyz;
+            float3 proximity_motion = t_MotionVector.Sample(s_LinearSampler, probing_index * g_View.viewportSizeInv).xyz;
 
             color_1stmoment += proximity_color;
             color_2ndmoment += proximity_color * proximity_color;
@@ -180,12 +181,12 @@ void ps_main(
     float3 color_var = color_2ndmoment - color_1stmoment * color_1stmoment;
     const float var_magnitude = 5.0f;
     float3 color_width = sqrt(color_var) * var_magnitude;
-    color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
-    color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
+    //color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
+    //color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
 
     float2 prev_location = i_position.xy - motion_1stmoment.xy * g_View.viewportSize;
     prev_location *= g_View.viewportSizeInv;
-    float3 prev_normal = normalize(t_NormalBuffer.Sample(s_FrameSampler, prev_location));
+    float3 prev_normal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prev_location));
     
     float3 blended = curr;
     float blendAlpha = 1.0f;
@@ -209,7 +210,7 @@ void ps_main(
         
         if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
         {
-            float3 hist = t_HistoryColor.Sample(s_FrameSampler, prev_location).xyz;
+            float3 hist = t_HistoryColor.Sample(s_LinearSampler, prev_location).xyz;
             //float3 hist = tentSampling(prev_location, t_HistoryColor);
             //hist = max(color_lowerbound, hist);
             //hist = min(color_upperbound, hist);
@@ -218,7 +219,7 @@ void ps_main(
         }
     }
 
-    //blended = float3(maximalConfidence, maximalConfidence, maximalConfidence);
+    //blended = color_upperbound;
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
 }

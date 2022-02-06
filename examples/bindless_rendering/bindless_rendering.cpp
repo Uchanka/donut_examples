@@ -113,7 +113,7 @@ private:
     
     bool m_EnableAnimations = true;
     int m_currentAAMode = TEMPORAL_SUPERSAMPLING;
-    float m_slidingSamplingRate = 0.25f;
+    float m_slidingSamplingRate = 0.5f;
     float m_WallclockTime = 0.f;
 
 public:
@@ -482,7 +482,9 @@ public:
                 nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredColor, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(3, m_NormalBuffer, nvrhi::Format::SRGBA8_UNORM),
                 nvrhi::BindingSetItem::Texture_SRV(4, m_HistoryNormal, nvrhi::Format::SRGBA8_UNORM),
-                nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
+                nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicWrapSampler),
+                nvrhi::BindingSetItem::Sampler(1, m_CommonPasses->m_LinearWrapSampler),
+                nvrhi::BindingSetItem::Sampler(2, m_CommonPasses->m_PointClampSampler)
             };
             nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescPost, m_TSSBindingLayout, m_TSSBindingSet);
 
