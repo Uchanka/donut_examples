@@ -77,20 +77,23 @@ void vs_main(
     o_uv_coord = g_uvs[i_vertexID];
 }
 
-float tentValue(float2 center, float2 position)
+float tentValue(float2 center, float2 position, float tentWidth)
 {
     float2 diff = abs(position - center);
-    float contributionX = (diff.x > 0.25f ? 0.0f : 1.0f - 4.0f * diff.x);
-    float contributionY = (diff.y > 0.25f ? 0.0f : 1.0f - 4.0f * diff.y);
+    float k = 1.0f / (0.5f * tentWidth);
+    float contributionX = (diff.x > 0.5f * tentWidth ? 0.0f : 1.0f - k * diff.x);
+    contributionX = clamp(contributionX, 0.0f, 1.0f);
+    float contributionY = (diff.y > 0.5f * tentWidth ? 0.0f : 1.0f - k * diff.y);
+    contributionY = clamp(contributionY, 0.0f, 1.0f);
     return contributionX * contributionY;
 }
 
 float4 upsamplingJitter(float2 svPosition, float samplingRate, Texture2D<float4> sourceTexture)
 {
     float2 pixelOffset = g_View.pixelOffset;
-    float2 pixelCenterLocation = svPosition * samplingRate;
-    float2 closestJitterLocation = pixelCenterLocation + pixelOffset;
-    
+    float2 jitterSpaceSVPosition = samplingRate * svPosition;
+    int2 floorSampleIndex = int2(floor(jitterSpaceSVPosition.x), floor(jitterSpaceSVPosition.y));
+
     const int patchSize = 3;
     float maximumWeight = 0.0f;
     float normalizationFactor = 0.0f;
@@ -100,12 +103,14 @@ float4 upsamplingJitter(float2 svPosition, float samplingRate, Texture2D<float4>
     {
         for (int dx = -(patchSize / 2); dx <= (patchSize / 2); ++dx)
         {
-            float2 probedSampleLocation = closestJitterLocation + float2(float(dx), float(dy));
-            float4 probedSample = t_JitteredCurrentBuffer.Sample(s_LinearSampler, probedSampleLocation * (1.0f / samplingRate) * g_View.viewportSizeInv);
-            float probedWeight = tentValue(pixelCenterLocation, probedSampleLocation);
-            maximumWeight = max(maximumWeight, probedWeight);
-            normalizationFactor += probedWeight;
-            collectedSample += probedWeight * probedSample;
+            int2 probedSampleIndex = floorSampleIndex + int2(dx, dy);
+            float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
+            float4 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex];
+            float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 1.0f);
+
+            collectedSample += probedSampleWeight * probedJitteredSample;
+            normalizationFactor += probedSampleWeight;
+            maximumWeight = max(maximumWeight, probedSampleWeight);
         }
     }
 
