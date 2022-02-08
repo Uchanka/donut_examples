@@ -42,7 +42,7 @@ Texture2D<float4> t_JitteredCurrentBuffer : register(t2);
 Texture2D<float3> t_NormalBuffer : register(t3);
 Texture2D<float3> t_HistoryNormal : register(t4);
 
-SamplerState s_AnistropicSampler : register(s0);
+SamplerState s_AnisotropicSampler : register(s0);
 SamplerState s_LinearSampler : register(s1);
 SamplerState s_NearestSampler : register(s2);
 
@@ -174,8 +174,7 @@ void ps_main(
     //color_lowerbound = max(curr - color_width, float3(0.0f, 0.0f, 0.0f));
     //color_upperbound = min(curr + color_width, float3(1.0f, 1.0f, 1.0f));
 
-    float2 prev_location = i_position.xy - motion_1stmoment.xy * g_View.viewportSize;
-    prev_location *= g_View.viewportSizeInv;
+    float2 prev_location = i_position.xy * g_View.viewportSizeInv - motion_1stmoment.xy;
     float3 prev_normal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prev_location));
     
     float3 blended = float3(0.0f, 0.0f, 0.0f);
@@ -197,12 +196,11 @@ void ps_main(
     }
     if (b_FrameIndex.frameHasReset == 0)
     {
-        //if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
+        //if (all(prev_location >= float2(0.0f, 0.0f)) && all(prev_location <= float2(1.0f, 1.0f)))
         {
-            float3 hist = t_HistoryColor.Sample(s_LinearSampler, prev_location).xyz;
-            //float3 hist = tentSampling(prev_location, t_HistoryColor);
-            //hist = max(color_lowerbound, hist);
-            //hist = min(color_upperbound, hist);
+            float3 hist = t_HistoryColor.Sample(s_AnisotropicSampler, prev_location).xyz;
+            hist = max(color_lowerbound, hist);
+            hist = min(color_upperbound, hist);
 
             blended = lerp(hist, curr, blendAlpha);
         }
