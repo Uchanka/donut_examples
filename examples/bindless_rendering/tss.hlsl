@@ -178,7 +178,7 @@ void ps_main(
     prev_location *= g_View.viewportSizeInv;
     float3 prev_normal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prev_location));
     
-    float3 blended = curr;
+    float3 blended = float3(0.0f, 0.0f, 0.0f);
     float blendAlpha = 1.0f;
     switch (b_FrameIndex.currentAAMode)
     {
@@ -197,7 +197,7 @@ void ps_main(
     }
     if (b_FrameIndex.frameHasReset == 0)
     {
-        if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
+        //if (all(prev_location > g_View.viewportOrigin) && all(prev_location < g_View.viewportOrigin + g_View.viewportSize))
         {
             float3 hist = t_HistoryColor.Sample(s_LinearSampler, prev_location).xyz;
             //float3 hist = tentSampling(prev_location, t_HistoryColor);
