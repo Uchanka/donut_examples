@@ -127,7 +127,7 @@ void ps_main(
             int2 probedSampleIndex = floorSampleIndex + int2(dx, dy);
             float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
             float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
-            float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 1.0f);
+            float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 2.0f);
 
             upsampledJitter += probedSampleWeight * probedJitteredSample.xyz;
             normalizationFactor += probedSampleWeight;
@@ -188,7 +188,7 @@ void ps_main(
         blendAlpha = 1.0f;
         break;
     case temporalSupersamplingAA:
-        blendAlpha = maximalConfidence * 0.4f;
+        blendAlpha = maximalConfidence * 0.1f;
         break;
     case temporalAntiAliasingAA:
         blendAlpha = maximalConfidence * 0.1f;

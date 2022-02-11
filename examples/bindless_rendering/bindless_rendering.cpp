@@ -313,6 +313,27 @@ public:
         return q;
     }
 
+    float Halton(int index, int base)
+    {
+        float f = 1.0f;
+        float r = 0.0f;
+
+        while (index > 0)
+        {
+            f = f / base;
+            r += f * (index % base);
+            index = index / base;
+        }
+
+        return r;
+    }
+
+    float2 Halton23Sequence(int index)
+    {
+        float2 result = float2(Halton(index, 2), Halton(index, 3));
+        return result;
+    }
+
     float2 GetCurrentFramePixelOffset(const int frameIndex)
     {
         float2 fixedMSAA4XPosition[4] = 
@@ -335,7 +356,8 @@ public:
         case RAW_UPSCALED:
             return float2(.0f);
         case TEMPORAL_SUPERSAMPLING:
-            return fixedMSAA16XPosition[frameIndex % (sizeof(fixedMSAA16XPosition) / sizeof(fixedMSAA16XPosition[0]))];
+            return Halton23Sequence(frameIndex) - float2(0.5f, 0.5f);
+            //return fixedMSAA16XPosition[frameIndex % (sizeof(fixedMSAA16XPosition) / sizeof(fixedMSAA16XPosition[0]))];
             //return fixedMSAA4XPosition[frameIndex % (sizeof(fixedMSAA4XPosition) / sizeof(fixedMSAA4XPosition[0]))];
             //return float2(VanDerCorputSequence(clampedIndex, 2) - 0.5f, VanDerCorputSequence(clampedIndex, 3) - 0.5f);
         case TEMPORAL_ANTIALIASING:
