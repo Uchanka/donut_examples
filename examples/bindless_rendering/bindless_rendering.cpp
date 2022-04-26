@@ -72,14 +72,17 @@ private:
     nvrhi::ShaderHandle m_UpsamplePixelShader;
     nvrhi::ShaderHandle m_TSSVertexShader;
     nvrhi::ShaderHandle m_TSSPixelShaderPost;
+    nvrhi::ShaderHandle m_FSRPixelPassShader;
 
     nvrhi::GraphicsPipelineHandle m_RenderPipeline;
     nvrhi::GraphicsPipelineHandle m_TSSPipeline;
+    nvrhi::GraphicsPipelineHandle m_FSRPipeline;
 
     nvrhi::BufferHandle m_SamplingRate;
     nvrhi::BufferHandle m_FrameIndex;
     nvrhi::BufferHandle m_ThisFrameViewConstants;
     nvrhi::BufferHandle m_LastFrameViewConstants;
+    nvrhi::BufferHandle m_FSRConstants;
     
     //High-res
     nvrhi::TextureHandle m_ColorBuffer;
@@ -141,6 +144,9 @@ public:
         m_UpsamplePixelShader = m_ShaderFactory->CreateShader("/shaders/app/upsample.hlsl", "ps_main", nullptr, nvrhi::ShaderType::Pixel);
         m_TSSVertexShader = m_ShaderFactory->CreateShader("/shaders/app/tss.hlsl", "vs_main", nullptr, nvrhi::ShaderType::Vertex);
         m_TSSPixelShaderPost = m_ShaderFactory->CreateShader("/shaders/app/tss.hlsl", "ps_main", nullptr, nvrhi::ShaderType::Pixel);
+
+        std::vector<engine::ShaderMacro> defines = { { "WIDTH", "64" }, { "HEIGHT", "1" }, { "DEPTH", "1" } };
+        m_FSRPixelPassShader = m_ShaderFactory->CreateShader("/shaders/app/FSR_Pass.hlsl", "mainCS", &defines, nvrhi::ShaderType::Compute);
 
         nvrhi::BindlessLayoutDesc bindlessLayoutDesc;
         bindlessLayoutDesc.visibility = nvrhi::ShaderType::All;
