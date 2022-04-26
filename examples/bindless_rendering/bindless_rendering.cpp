@@ -654,8 +654,8 @@ int main(int __argc, const char** __argv)
     deviceParams.enableNvrhiValidationLayer = true;
 #endif
     deviceParams.vsyncEnabled = true;
-    deviceParams.backBufferWidth = 1920;
-    deviceParams.backBufferHeight = 1080;
+    deviceParams.backBufferWidth = 1280;
+    deviceParams.backBufferHeight = 720;
 
     if (!deviceManager->CreateWindowDeviceAndSwapChain(deviceParams, g_WindowTitle))
     {

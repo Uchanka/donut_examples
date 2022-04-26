@@ -68,6 +68,11 @@ static const float2 g_uvs[] =
     float2(1.0f, 1.0f)
 };
 
+float getLuminance(float3 color)
+{
+    return 0.30f * color.r + 0.59f * color.g + 0.11f * color.b;
+}
+
 void vs_main(
     in uint i_vertexID : SV_VertexID,
     out float4 o_position : SV_Position,
@@ -109,6 +114,8 @@ void ps_main(
     //float3 color_2ndmoment = float3(0.0f, 0.0f, 0.0f);
     float3 color_lowerbound = float3(1.0f, 1.0f, 1.0f);
     float3 color_upperbound = float3(0.0f, 0.0f, 0.0f);
+    float luminanceLowerbound = 1.0f;
+    float luminanceUpperbound = 0.0f;
 
     float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
     
@@ -137,8 +144,11 @@ void ps_main(
 
             //color_1stmoment += probedJitteredSample;
             //color_2ndmoment += probedJitteredSample * probedJitteredSample;
+            float probedSampleLuminance = getLuminance(probedJitteredSample);
             color_lowerbound = min(probedJitteredSample, color_lowerbound);
             color_upperbound = max(probedJitteredSample, color_upperbound);
+            luminanceLowerbound = min(luminanceLowerbound, probedSampleLuminance);
+            luminanceUpperbound = max(luminanceUpperbound, probedSampleLuminance);
 
             motion_1stmoment += proximity_motion;
         }
@@ -199,8 +209,10 @@ void ps_main(
         //if (all(prev_location >= float2(0.0f, 0.0f)) && all(prev_location <= float2(1.0f, 1.0f)))
         {
             float3 hist = t_HistoryColor.Sample(s_AnisotropicSampler, prev_location).xyz;
-            hist = max(color_lowerbound, hist);
-            hist = min(color_upperbound, hist);
+            //float histLuminance = getLuminance(hist);
+            //blendAlpha = (histLuminance > luminanceLowerbound && histLuminance < luminanceUpperbound) ? blendAlpha : 1.0f;
+            //hist = max(color_lowerbound, hist);
+            //hist = min(color_upperbound, hist);
 
             blended = lerp(hist, curr, blendAlpha);
         }
