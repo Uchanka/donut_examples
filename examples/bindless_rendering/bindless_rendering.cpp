@@ -58,11 +58,15 @@ private:
     nvrhi::BindingLayoutHandle m_MotionBindingLayout;
     nvrhi::BindingLayoutHandle m_UpsampleBindingLayout;
     nvrhi::BindingLayoutHandle m_TSSBindingLayout;
+    nvrhi::BindingLayoutHandle m_EASUBindingLayout;
+    nvrhi::BindingLayoutHandle m_RCASBindingLayout;
     
     nvrhi::BindingSetHandle m_RenderBindingSet;
     nvrhi::BindingSetHandle m_MotionBindingSet;
     nvrhi::BindingSetHandle m_UpsampleBindingSet;
     nvrhi::BindingSetHandle m_TSSBindingSet;
+    nvrhi::BindingSetHandle m_EASUBindingSet;
+    nvrhi::BindingSetHandle m_RCASBindingSet;
 
     nvrhi::ShaderHandle m_RenderVertexShader;
     nvrhi::ShaderHandle m_RenderPixelShader;
@@ -72,11 +76,13 @@ private:
     nvrhi::ShaderHandle m_UpsamplePixelShader;
     nvrhi::ShaderHandle m_TSSVertexShader;
     nvrhi::ShaderHandle m_TSSPixelShaderPost;
-    nvrhi::ShaderHandle m_FSRPixelPassShader;
+    nvrhi::ShaderHandle m_EASUComputePassShader;
+    nvrhi::ShaderHandle m_RCASComputePassShader;
 
     nvrhi::GraphicsPipelineHandle m_RenderPipeline;
     nvrhi::GraphicsPipelineHandle m_TSSPipeline;
-    nvrhi::GraphicsPipelineHandle m_FSRPipeline;
+    nvrhi::GraphicsPipelineHandle m_EASUPipeline;
+    nvrhi::GraphicsPipelineHandle m_RCASPipeline;
 
     nvrhi::BufferHandle m_SamplingRate;
     nvrhi::BufferHandle m_FrameIndex;
@@ -95,7 +101,7 @@ private:
     nvrhi::TextureHandle m_SSMotionVector;
     
     //Low-res
-    nvrhi::TextureHandle m_JitteredColor;
+    nvrhi::TextureHandle m_JitteredColor;//Use this one as easu input
     nvrhi::TextureHandle m_NormalBuffer;
     nvrhi::TextureHandle m_HistoryNormal;
     nvrhi::TextureHandle m_RenderMotionVector;
@@ -105,6 +111,7 @@ private:
     
     nvrhi::FramebufferHandle m_RenderFramebuffer;
     nvrhi::FramebufferHandle m_TSSFramebuffer;
+    nvrhi::FramebufferHandle m_FSRFramebuffer;
    
     std::shared_ptr<engine::ShaderFactory> m_ShaderFactory;
     std::unique_ptr<engine::Scene> m_Scene;
@@ -145,8 +152,10 @@ public:
         m_TSSVertexShader = m_ShaderFactory->CreateShader("/shaders/app/tss.hlsl", "vs_main", nullptr, nvrhi::ShaderType::Vertex);
         m_TSSPixelShaderPost = m_ShaderFactory->CreateShader("/shaders/app/tss.hlsl", "ps_main", nullptr, nvrhi::ShaderType::Pixel);
 
-        std::vector<engine::ShaderMacro> defines = { { "WIDTH", "64" }, { "HEIGHT", "1" }, { "DEPTH", "1" } };
-        m_FSRPixelPassShader = m_ShaderFactory->CreateShader("/shaders/app/FSR_Pass.hlsl", "mainCS", &defines, nvrhi::ShaderType::Compute);
+        std::vector<engine::ShaderMacro> defines = { { "SAMPLE_EASU", "1" }, { "SAMPLE_RCAS", "0" } };
+        m_EASUComputePassShader = m_ShaderFactory->CreateShader("/shaders/app/fsr_easu.hlsl", "mainCS", &defines, nvrhi::ShaderType::Compute);
+        defines = { { "SAMPLE_EASU", "0" }, { "SAMPLE_RCAS", "1" } };
+        m_RCASComputePassShader = m_ShaderFactory->CreateShader("/shaders/app/fsr_rcas.hlsl", "mainCS", &defines, nvrhi::ShaderType::Compute);
 
         nvrhi::BindlessLayoutDesc bindlessLayoutDesc;
         bindlessLayoutDesc.visibility = nvrhi::ShaderType::All;
@@ -301,6 +310,8 @@ public:
 
         m_RenderPipeline = nullptr;
         m_TSSPipeline = nullptr;
+        m_EASUPipeline = nullptr;
+        m_RCASPipeline = nullptr;
 
         m_BindingCache->Clear();
     }
@@ -405,7 +416,7 @@ public:
             m_ColorBuffer = GetDevice()->createTexture(textureDescHighRes);
 
             textureDescHighRes.isTypeless = false;
-            textureDescHighRes.format = nvrhi::Format::SRGBA8_UNORM;
+            textureDescHighRes.format = nvrhi::Format::RGBA16_FLOAT;
             textureDescHighRes.isUAV = true;
             textureDescHighRes.debugName = "SupersampledColor";
             m_SSColorBuffer = GetDevice()->createTexture(textureDescHighRes);
@@ -425,7 +436,7 @@ public:
 
             //Low-res texture
             nvrhi::TextureDesc textureDescLowRes;
-            textureDescLowRes.format = nvrhi::Format::SRGBA8_UNORM;
+            textureDescLowRes.format = nvrhi::Format::RGBA16_FLOAT;
             textureDescLowRes.isRenderTarget = true;
             textureDescLowRes.initialState = nvrhi::ResourceStates::RenderTarget;
             textureDescLowRes.keepInitialState = true;
@@ -442,7 +453,7 @@ public:
             m_DepthBuffer = GetDevice()->createTexture(textureDescLowRes);
 
             textureDescLowRes.isTypeless = false;
-            textureDescLowRes.format = nvrhi::Format::SRGBA8_UNORM;
+            textureDescLowRes.format = nvrhi::Format::RGBA16_FLOAT;
             textureDescLowRes.isUAV = true;
             textureDescLowRes.initialState = nvrhi::ResourceStates::RenderTarget;
             textureDescLowRes.debugName = "NormalBuffer";
@@ -506,10 +517,10 @@ public:
                 nvrhi::BindingSetItem::ConstantBuffer(1, m_SamplingRate),
                 nvrhi::BindingSetItem::PushConstants(2, sizeof(int2)),
                 nvrhi::BindingSetItem::Texture_SRV(0, m_RenderMotionVector, nvrhi::Format::RGBA16_FLOAT),
-                nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryColor, nvrhi::Format::SRGBA8_UNORM),
-                nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredColor, nvrhi::Format::SRGBA8_UNORM),
-                nvrhi::BindingSetItem::Texture_SRV(3, m_NormalBuffer, nvrhi::Format::SRGBA8_UNORM),
-                nvrhi::BindingSetItem::Texture_SRV(4, m_HistoryNormal, nvrhi::Format::SRGBA8_UNORM),
+                nvrhi::BindingSetItem::Texture_SRV(1, m_HistoryColor, nvrhi::Format::RGBA16_FLOAT),
+                nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredColor, nvrhi::Format::RGBA16_FLOAT),
+                nvrhi::BindingSetItem::Texture_SRV(3, m_NormalBuffer, nvrhi::Format::RGBA16_FLOAT),
+                nvrhi::BindingSetItem::Texture_SRV(4, m_HistoryNormal, nvrhi::Format::RGBA16_FLOAT),
                 nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicClampSampler),
                 nvrhi::BindingSetItem::Sampler(1, m_CommonPasses->m_LinearClampSampler),
                 nvrhi::BindingSetItem::Sampler(2, m_CommonPasses->m_PointClampSampler)
@@ -526,6 +537,11 @@ public:
             pipelineDescPost.renderState.rasterState.setCullNone();
 
             m_TSSPipeline = GetDevice()->createGraphicsPipeline(pipelineDescPost, m_TSSFramebuffer);
+
+            nvrhi::BindingSetDesc bindingSetDescFSR;
+            bindingSetDescFSR.bindings = {
+                //nvrhi::BindingSetItem::Texture_SRV(),
+            };
         }
 
         m_CommandList->open();
