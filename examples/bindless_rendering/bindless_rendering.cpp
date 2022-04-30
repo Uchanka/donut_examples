@@ -45,6 +45,15 @@ static const char* g_WindowTitle = "Donut Example: Bindless Rendering";
 
 static enum AAMode { NATIVE_RESOLUTION, RAW_UPSCALED, TEMPORAL_SUPERSAMPLING, TEMPORAL_ANTIALIASING, PLACE_HOLDER };
 
+struct FSRConstants
+{
+    uint32_t4 Const0;
+    uint32_t4 Const1;
+    uint32_t4 Const2;
+    uint32_t4 Const3;
+    uint32_t4 Sample;
+};
+
 class BindlessRendering : public app::ApplicationBase
 {
 private:
@@ -187,7 +196,8 @@ public:
         m_FrameIndex = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(int), "FrameIndex", engine::c_MaxRenderPassConstantBufferVersions));
         m_ThisFrameViewConstants = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstants", engine::c_MaxRenderPassConstantBufferVersions));
         m_LastFrameViewConstants = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(PlanarViewConstants), "ViewConstantsLastFrame", engine::c_MaxRenderPassConstantBufferVersions));
-        
+        m_FSRConstants = GetDevice()->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(FSRConstants), "FSRConstants", engine::c_MaxRenderPassConstantBufferVersions));
+
         GetDevice()->waitForIdle();
 
         return true;
@@ -560,11 +570,70 @@ public:
         bindingSetDescRCAS.bindings =
         {
             nvrhi::BindingSetItem::ConstantBuffer(0, m_FSRConstants),
-            nvrhi::BindingSetItem::Texture_UAV(0, m_SSColorBuffer, nvrhi::Format::RGBA16_FLOAT),
-            nvrhi::BindingSetItem::Texture_SRV(0, m_ColorBuffer, nvrhi::Format::RGBA16_FLOAT),
+            nvrhi::BindingSetItem::Texture_SRV(0, m_SSColorBuffer, nvrhi::Format::RGBA16_FLOAT),
+            nvrhi::BindingSetItem::Texture_UAV(0, m_ColorBuffer, nvrhi::Format::RGBA16_FLOAT),
             nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
         };
         nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescRCAS, m_RCASBindingLayout, m_RCASBindingSet);
+
+        nvrhi::ComputePipelineDesc pipelineDescRCAS = nvrhi::ComputePipelineDesc().setComputeShader(m_RCASComputePassShader).addBindingLayout(m_RCASBindingLayout);
+        m_RCASPipeline = GetDevice()->createComputePipeline(pipelineDescRCAS);
+    }
+
+    void fillRenderViewConstants(PlanarViewConstants &viewConstants, int renderWidth, int renderHeight)
+    {
+        if (GetFrameIndex() != 0)
+        {
+            m_View.FillPlanarViewConstants(viewConstants);
+            m_CommandList->writeBuffer(m_LastFrameViewConstants, &viewConstants, sizeof(viewConstants));
+        }
+
+        m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
+        nvrhi::Viewport windowViewport(static_cast<float>(renderWidth), static_cast<float>(renderHeight));
+        m_View.SetViewport(windowViewport);
+        m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewport.width() / windowViewport.height(), 0.1f));
+        m_View.UpdateCache();
+
+        m_Scene->Refresh(m_CommandList, GetFrameIndex());
+
+        m_CommandList->clearDepthStencilTexture(m_DepthBuffer, nvrhi::AllSubresources, true, 0.f, true, 0);
+
+        if (GetFrameIndex() == 0)
+        {
+            m_View.FillPlanarViewConstants(viewConstants);
+            m_CommandList->writeBuffer(m_LastFrameViewConstants, &viewConstants, sizeof(viewConstants));
+        }
+        m_View.FillPlanarViewConstants(viewConstants);
+
+        m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
+        m_CommandList->writeBuffer(m_SamplingRate, &m_slidingSamplingRate, sizeof(m_slidingSamplingRate));
+    }
+
+    void fillTSSViewConstants(PlanarViewConstants& viewConstants, int upsampledWidth, int upsampledHeight)
+    {
+        nvrhi::Viewport windowViewportTSS(static_cast<float>(upsampledWidth), static_cast<float>(upsampledHeight));
+        m_View.SetViewport(windowViewportTSS);
+        m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewportTSS.width() / windowViewportTSS.height(), 0.1f));
+        m_View.UpdateCache();
+
+        m_View.FillPlanarViewConstants(viewConstants);
+
+        m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
+        m_CommandList->writeBuffer(m_SamplingRate, &m_slidingSamplingRate, sizeof(m_slidingSamplingRate));
+    }
+
+    void copyBlitAndClear(nvrhi::IFramebuffer* framebuffer)
+    {
+        m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
+
+        m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
+        m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_JitteredColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_SSColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_NormalBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_HistoryNormal, nvrhi::AllSubresources, nvrhi::Color(0.f));
     }
 
     void Render(nvrhi::IFramebuffer* framebuffer) override
@@ -602,30 +671,7 @@ public:
         m_CommandList->open();
         
         PlanarViewConstants viewConstants;
-        if (GetFrameIndex() != 0)
-        {
-            m_View.FillPlanarViewConstants(viewConstants);
-            m_CommandList->writeBuffer(m_LastFrameViewConstants, &viewConstants, sizeof(viewConstants));
-        }
-
-        m_View.SetPixelOffset(GetCurrentFramePixelOffset(GetFrameIndex()));
-        nvrhi::Viewport windowViewport(static_cast<float>(renderWidth), static_cast<float>(renderHeight));
-        m_View.SetViewport(windowViewport);
-        m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewport.width() / windowViewport.height(), 0.1f));
-        m_View.UpdateCache();
-        
-        m_Scene->Refresh(m_CommandList, GetFrameIndex());
-
-        m_CommandList->clearDepthStencilTexture(m_DepthBuffer, nvrhi::AllSubresources, true, 0.f, true, 0);
-
-        if (GetFrameIndex() == 0)
-        {
-            m_View.FillPlanarViewConstants(viewConstants);
-            m_CommandList->writeBuffer(m_LastFrameViewConstants, &viewConstants, sizeof(viewConstants));
-        }
-        m_View.FillPlanarViewConstants(viewConstants);
-        m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
-        m_CommandList->writeBuffer(m_SamplingRate, &m_slidingSamplingRate, sizeof(m_slidingSamplingRate));
+        fillRenderViewConstants(viewConstants, renderWidth, renderHeight);
 
         int2 frameStatus = int2(frameHasBeenReset, m_currentAAMode);
         m_CommandList->writeBuffer(m_FrameIndex, &frameStatus, sizeof(frameStatus));
@@ -657,15 +703,7 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
         
         m_CommandList->open();
-        nvrhi::Viewport windowViewportTSS(static_cast<float>(upsampledWidth), static_cast<float>(upsampledHeight));
-        m_View.SetViewport(windowViewportTSS);
-        m_View.SetMatrices(m_Camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(dm::PI_f * 0.25f, windowViewportTSS.width() / windowViewportTSS.height(), 0.1f));
-        m_View.UpdateCache();
-
-        m_View.FillPlanarViewConstants(viewConstants);
-
-        m_CommandList->writeBuffer(m_ThisFrameViewConstants, &viewConstants, sizeof(viewConstants));
-        m_CommandList->writeBuffer(m_SamplingRate, &m_slidingSamplingRate, sizeof(m_slidingSamplingRate));
+        fillTSSViewConstants(viewConstants, upsampledWidth, upsampledHeight);
 
         nvrhi::GraphicsState statePost;
         statePost.pipeline = m_TSSPipeline;
@@ -688,17 +726,9 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
 
         m_CommandList->open();
-        m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
         
-        m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
-        m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_JitteredColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_SSColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_NormalBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_HistoryNormal, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        
+        copyBlitAndClear(framebuffer);
+
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
     }
