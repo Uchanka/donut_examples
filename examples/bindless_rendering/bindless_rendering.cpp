@@ -36,6 +36,10 @@
 #include <donut/core/math/math.h>
 #include <nvrhi/utils.h>
 
+#define A_CPU
+#include "ffx_a.h"
+#include "ffx_fsr1.h"
+
 using namespace donut;
 using namespace donut::math;
 
@@ -101,17 +105,19 @@ private:
     nvrhi::BufferHandle m_FSRConstants;
     
     //High-res
-    nvrhi::TextureHandle m_ColorBuffer;//rcas output
-
+    nvrhi::TextureHandle m_ColorBuffer;
+    nvrhi::TextureHandle m_FSROutputBuffer;//rcas output
     nvrhi::TextureHandle m_HistoryColor;
     
-    nvrhi::TextureHandle m_SSColorBuffer;//easu output, rcas input
+    nvrhi::TextureHandle m_FSRIntermediateBuffer;//easu output, rcas input
+    nvrhi::TextureHandle m_SSColorBuffer;
     nvrhi::TextureHandle m_SSNormalBuffer;
     nvrhi::TextureHandle m_SSHistoryNormal;
     nvrhi::TextureHandle m_SSMotionVector;
     
     //Low-res
-    nvrhi::TextureHandle m_JitteredColor;//Use this one as easu input
+    nvrhi::TextureHandle m_JitteredColor;
+    nvrhi::TextureHandle m_FSRInputBuffer;//Use this one as easu input
     nvrhi::TextureHandle m_NormalBuffer;
     nvrhi::TextureHandle m_HistoryNormal;
     nvrhi::TextureHandle m_RenderMotionVector;
@@ -301,6 +307,9 @@ public:
     { 
         m_DepthBuffer = nullptr;
         m_ColorBuffer = nullptr;
+        m_FSRInputBuffer = nullptr;
+        m_FSROutputBuffer = nullptr;
+        m_FSRIntermediateBuffer = nullptr;
         m_SSColorBuffer = nullptr;
         m_HistoryColor = nullptr;
         m_HistoryNormal = nullptr;
@@ -410,7 +419,6 @@ public:
         textureDescHighRes.keepInitialState = true;
         textureDescHighRes.clearValue = nvrhi::Color(0.f);
         textureDescHighRes.useClearValue = true;
-        textureDescHighRes.isUAV = true;
         textureDescHighRes.debugName = "ScreenContent";
         textureDescHighRes.width = width;
         textureDescHighRes.height = height;
@@ -419,8 +427,15 @@ public:
 
         textureDescHighRes.isTypeless = false;
         textureDescHighRes.format = nvrhi::Format::RGBA16_FLOAT;
+        textureDescHighRes.isUAV = true;
         textureDescHighRes.debugName = "SupersampledColor";
         m_SSColorBuffer = GetDevice()->createTexture(textureDescHighRes);
+
+        textureDescHighRes.debugName = "OutputFSR";
+        m_FSROutputBuffer = GetDevice()->createTexture(textureDescHighRes);
+
+        textureDescHighRes.debugName = "IntermediateFSR";
+        m_FSRIntermediateBuffer = GetDevice()->createTexture(textureDescHighRes);
 
         textureDescHighRes.debugName = "HistoryColor";
         m_HistoryColor = GetDevice()->createTexture(textureDescHighRes);
@@ -464,6 +479,9 @@ public:
 
         textureDescLowRes.debugName = "HistoryNormal";
         m_HistoryNormal = GetDevice()->createTexture(textureDescLowRes);
+
+        textureDescLowRes.debugName = "InputBuffer";
+        m_FSRInputBuffer = GetDevice()->createTexture(textureDescLowRes);
 
         textureDescLowRes.format = nvrhi::Format::RGBA16_FLOAT;
         textureDescLowRes.debugName = "MotionVector";
@@ -560,8 +578,8 @@ public:
         bindingSetDescEASU.bindings =
         {
             nvrhi::BindingSetItem::ConstantBuffer(0, m_FSRConstants),
-            nvrhi::BindingSetItem::Texture_SRV(0, m_JitteredColor, nvrhi::Format::RGBA16_FLOAT),
-            nvrhi::BindingSetItem::Texture_UAV(0, m_SSColorBuffer, nvrhi::Format::RGBA16_FLOAT),
+            nvrhi::BindingSetItem::Texture_SRV(0, m_FSRInputBuffer, nvrhi::Format::RGBA16_FLOAT),
+            nvrhi::BindingSetItem::Texture_UAV(0, m_FSRIntermediateBuffer, nvrhi::Format::RGBA16_FLOAT),
             nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
         };
         nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescEASU, m_EASUBindingLayout, m_EASUBindingSet);
@@ -576,8 +594,8 @@ public:
         bindingSetDescRCAS.bindings =
         {
             nvrhi::BindingSetItem::ConstantBuffer(0, m_FSRConstants),
-            nvrhi::BindingSetItem::Texture_SRV(0, m_SSColorBuffer, nvrhi::Format::RGBA16_FLOAT),
-            nvrhi::BindingSetItem::Texture_UAV(0, m_ColorBuffer, nvrhi::Format::RGBA16_FLOAT),
+            nvrhi::BindingSetItem::Texture_SRV(0, m_FSRIntermediateBuffer, nvrhi::Format::RGBA16_FLOAT),
+            nvrhi::BindingSetItem::Texture_UAV(0, m_FSROutputBuffer, nvrhi::Format::RGBA16_FLOAT),
             nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_LinearClampSampler)
         };
         nvrhi::utils::CreateBindingSetAndLayout(GetDevice(), nvrhi::ShaderType::All, 0, bindingSetDescRCAS, m_RCASBindingLayout, m_RCASBindingSet);
@@ -628,9 +646,32 @@ public:
         m_CommandList->writeBuffer(m_SamplingRate, &m_slidingSamplingRate, sizeof(m_slidingSamplingRate));
     }
 
-    void clearUptheSignals(nvrhi::IFramebuffer* framebuffer)
+    void fillEASUConstants(const uint32_t displayWidth, const uint32_t displayHeight, const uint32_t renderWidth, const uint32_t renderHeight)
     {
-        
+        FSRConstants fsrConsts = {};
+        FsrEasuCon(
+            reinterpret_cast<AU1*>(&fsrConsts.Const0), reinterpret_cast<AU1*>(&fsrConsts.Const1),
+            reinterpret_cast<AU1*>(&fsrConsts.Const2), reinterpret_cast<AU1*>(&fsrConsts.Const3),
+            static_cast<AF1>(renderWidth), static_cast<AF1>(renderHeight), 
+            static_cast<AF1>(renderWidth), static_cast<AF1>(renderHeight), 
+            (AF1)displayWidth, (AF1)displayHeight);
+        fsrConsts.Sample.x = 0;//(hdr && m_currentAAMode == FSR_WITH_RCAS) ? 0 : 1;
+
+        m_CommandList->writeBuffer(m_FSRConstants, &fsrConsts, sizeof(fsrConsts));
+    }
+
+    void fillRCASConstants()
+    {
+        FSRConstants fsrConsts = {};
+        float rcasAttenuation = 0.25f;
+        FsrRcasCon(reinterpret_cast<AU1*>(&fsrConsts.Const0), rcasAttenuation);
+        fsrConsts.Sample.x = 0;
+
+        m_CommandList->writeBuffer(m_FSRConstants, &fsrConsts, sizeof(fsrConsts));
+    }
+
+    void clearUptheSignals()
+    {
         m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
@@ -707,32 +748,70 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
         
         m_CommandList->open();
-        fillTSSViewConstants(viewConstants, upsampledWidth, upsampledHeight);
-
-        nvrhi::GraphicsState statePost;
-        statePost.pipeline = m_TSSPipeline;
-        statePost.framebuffer = m_TSSFramebuffer;
-        statePost.bindings = { m_TSSBindingSet };
-        statePost.viewport = m_View.GetViewportState();
-        m_CommandList->setGraphicsState(statePost);
-
-        m_CommandList->setPushConstants(&frameStatus, sizeof(frameStatus));
-        
-        if (frameHasBeenReset == 1)
+        if (m_currentAAMode != FSR_WITHOUT_RCAS && m_currentAAMode != FSR_WITH_RCAS)
         {
-            m_CommandList->clearTextureFloat(m_HistoryColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        }
+            fillTSSViewConstants(viewConstants, upsampledWidth, upsampledHeight);
 
-        nvrhi::DrawArguments argsPost;
-        argsPost.vertexCount = 6;
-        m_CommandList->draw(argsPost);
+            nvrhi::GraphicsState statePost;
+            statePost.pipeline = m_TSSPipeline;
+            statePost.framebuffer = m_TSSFramebuffer;
+            statePost.bindings = { m_TSSBindingSet };
+            statePost.viewport = m_View.GetViewportState();
+            m_CommandList->setGraphicsState(statePost);
+
+            m_CommandList->setPushConstants(&frameStatus, sizeof(frameStatus));
+
+            if (frameHasBeenReset == 1)
+            {
+                m_CommandList->clearTextureFloat(m_HistoryColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
+            }
+
+            nvrhi::DrawArguments argsPost;
+            argsPost.vertexCount = 6;
+            m_CommandList->draw(argsPost);
+        }
+        else
+        {
+            m_CommandList->copyTexture(m_FSRInputBuffer, nvrhi::TextureSlice(), m_JitteredColor, nvrhi::TextureSlice());
+            fillEASUConstants(upsampledWidth, upsampledHeight, renderWidth, renderHeight);
+            static const int threadGroupDim = 16;
+            int dispatchX = (upsampledWidth + threadGroupDim - 1) / threadGroupDim;
+            int dispatchY = (upsampledHeight + threadGroupDim - 1) / threadGroupDim;
+
+            nvrhi::ComputeState easuState;
+            easuState.pipeline = m_EASUPipeline;
+            easuState.bindings = { m_EASUBindingSet };
+            m_CommandList->setComputeState(easuState);
+            m_CommandList->dispatch(dispatchX, dispatchY);
+        }
+        m_CommandList->close();
+        GetDevice()->executeCommandList(m_CommandList);
+
+        m_CommandList->open();
+        if (m_currentAAMode == FSR_WITH_RCAS)
+        {
+            fillRCASConstants();
+            static const int threadGroupDim = 16;
+            int dispatchX = (upsampledWidth + threadGroupDim - 1) / threadGroupDim;
+            int dispatchY = (upsampledHeight + threadGroupDim - 1) / threadGroupDim;
+
+            nvrhi::ComputeState rcasState;
+            rcasState.pipeline = m_RCASPipeline;
+            rcasState.bindings = { m_RCASBindingSet };
+            m_CommandList->setComputeState(rcasState);
+            m_CommandList->dispatch(dispatchX, dispatchY);
+        }
+        else if (m_currentAAMode == FSR_WITHOUT_RCAS)
+        {
+            m_CommandList->copyTexture(m_ColorBuffer, nvrhi::TextureSlice(), m_FSRIntermediateBuffer, nvrhi::TextureSlice());
+        }
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
 
         m_CommandList->open();
         m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
-        clearUptheSignals(framebuffer);
+        clearUptheSignals();
 
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
