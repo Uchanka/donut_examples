@@ -43,7 +43,7 @@ using namespace donut::math;
 
 static const char* g_WindowTitle = "Donut Example: Bindless Rendering";
 
-static enum AAMode { NATIVE_RESOLUTION, RAW_UPSCALED, TEMPORAL_SUPERSAMPLING, TEMPORAL_ANTIALIASING, PLACE_HOLDER };
+static enum AAMode { NATIVE_RESOLUTION, RAW_UPSCALED, TEMPORAL_SUPERSAMPLING, TEMPORAL_ANTIALIASING, FSR_WITHOUT_RCAS, FSR_WITH_RCAS, PLACE_HOLDER };
 
 struct FSRConstants
 {
@@ -284,6 +284,12 @@ public:
         case TEMPORAL_ANTIALIASING:
             extraInfoOnAAMode += " TAA";
             break;
+        case FSR_WITHOUT_RCAS:
+            extraInfoOnAAMode += " FSR (Unsharpened)";
+            break;
+        case FSR_WITH_RCAS:
+            extraInfoOnAAMode += " FSR (Sharpened)";
+            break;
         default:
             break;
         }
@@ -398,12 +404,13 @@ public:
     {
         //High-res texture
         nvrhi::TextureDesc textureDescHighRes;
-        textureDescHighRes.format = nvrhi::Format::SRGBA8_UNORM;
+        textureDescHighRes.format = nvrhi::Format::RGBA16_FLOAT;
         textureDescHighRes.isRenderTarget = true;
         textureDescHighRes.initialState = nvrhi::ResourceStates::RenderTarget;
         textureDescHighRes.keepInitialState = true;
         textureDescHighRes.clearValue = nvrhi::Color(0.f);
         textureDescHighRes.useClearValue = true;
+        textureDescHighRes.isUAV = true;
         textureDescHighRes.debugName = "ScreenContent";
         textureDescHighRes.width = width;
         textureDescHighRes.height = height;
@@ -412,7 +419,6 @@ public:
 
         textureDescHighRes.isTypeless = false;
         textureDescHighRes.format = nvrhi::Format::RGBA16_FLOAT;
-        textureDescHighRes.isUAV = true;
         textureDescHighRes.debugName = "SupersampledColor";
         m_SSColorBuffer = GetDevice()->createTexture(textureDescHighRes);
 
@@ -622,11 +628,9 @@ public:
         m_CommandList->writeBuffer(m_SamplingRate, &m_slidingSamplingRate, sizeof(m_slidingSamplingRate));
     }
 
-    void copyBlitAndClear(nvrhi::IFramebuffer* framebuffer)
+    void clearUptheSignals(nvrhi::IFramebuffer* framebuffer)
     {
-        m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
-
-        m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
+        
         m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
         m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
@@ -726,8 +730,9 @@ public:
         GetDevice()->executeCommandList(m_CommandList);
 
         m_CommandList->open();
-        
-        copyBlitAndClear(framebuffer);
+        m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
+        m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
+        clearUptheSignals(framebuffer);
 
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
