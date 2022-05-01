@@ -328,6 +328,7 @@ public:
         m_UpsampleBindingLayout = nullptr;
         m_TSSBindingLayout = nullptr;
 
+        //Never forget to clear the binding set!
         m_RenderBindingSet = nullptr;
         m_MotionBindingSet = nullptr;
         m_UpsampleBindingSet = nullptr;
@@ -802,6 +803,7 @@ public:
             rcasState.bindings = { m_RCASBindingSet };
             m_CommandList->setComputeState(rcasState);
             m_CommandList->dispatch(dispatchX, dispatchY);
+            m_CommandList->copyTexture(m_ColorBuffer, nvrhi::TextureSlice(), m_FSROutputBuffer, nvrhi::TextureSlice());
         }
         else if (m_currentAAMode == FSR_WITHOUT_RCAS)
         {
