@@ -666,7 +666,7 @@ public:
     void fillRCASConstants()
     {
         FSRConstants fsrConsts = {};
-        float rcasAttenuation = 0.25f;
+        float rcasAttenuation = 0.0f;
         FsrRcasCon(reinterpret_cast<AU1*>(&fsrConsts.Const0), rcasAttenuation);
         fsrConsts.Sample.x = 0;
 
@@ -802,18 +802,24 @@ public:
             rcasState.pipeline = m_RCASPipeline;
             rcasState.bindings = { m_RCASBindingSet };
             m_CommandList->setComputeState(rcasState);
-            m_CommandList->dispatch(dispatchX, dispatchY);
+            m_CommandList->dispatch(dispatchX, dispatchY);   
+        }
+        m_CommandList->close();
+        GetDevice()->executeCommandList(m_CommandList);
+
+        m_CommandList->open();
+        if (m_currentAAMode == FSR_WITH_RCAS)
+        {
             m_CommandList->copyTexture(m_ColorBuffer, nvrhi::TextureSlice(), m_FSROutputBuffer, nvrhi::TextureSlice());
         }
         else if (m_currentAAMode == FSR_WITHOUT_RCAS)
         {
             m_CommandList->copyTexture(m_ColorBuffer, nvrhi::TextureSlice(), m_FSRIntermediateBuffer, nvrhi::TextureSlice());
         }
-        m_CommandList->close();
-        GetDevice()->executeCommandList(m_CommandList);
-
-        m_CommandList->open();
-        m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
+        else if (m_currentAAMode == TEMPORAL_ANTIALIASING || m_currentAAMode == TEMPORAL_SUPERSAMPLING)
+        {
+            m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
+        }
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
         clearUptheSignals();
 
