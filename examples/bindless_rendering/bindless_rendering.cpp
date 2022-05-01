@@ -332,6 +332,8 @@ public:
         m_MotionBindingSet = nullptr;
         m_UpsampleBindingSet = nullptr;
         m_TSSBindingSet = nullptr;
+        m_EASUBindingSet = nullptr;
+        m_RCASBindingSet = nullptr;
 
         m_RenderPipeline = nullptr;
         m_TSSPipeline = nullptr;
