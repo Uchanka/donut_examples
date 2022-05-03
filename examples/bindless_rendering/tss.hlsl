@@ -100,10 +100,10 @@ void ps_main(
     out float4 current_buffer : SV_Target1)
 {
     const int nativeResolution = 0;
-    const int rawUpscaled = 1;
-    const int temporalSupersamplingAA = 2;
-    const int temporalAntiAliasingAA = 3;
-    const int nativeWithTAA = 6;
+    const int nativeWithTAA = 1;
+    const int rawUpscaled = 2;
+    const int temporalSupersamplingAA = 3;
+    const int temporalAntiAliasingAA = 4;
 
     float maximalConfidence;
     float3 curr = float3(0.0f, 0.0f, 0.0f);

@@ -107,9 +107,10 @@ void ps_main(
     out float4 motion_vector : SV_Target3)
 {
     const int nativeResolution = 0;
-    const int rawUpscaled = 1;
-    const int temporalSupersamplingAA = 2;
-    const int temporalAntiAliasingAA = 3;
+    const int nativeWithTAA = 1;
+    const int rawUpscaled = 2;
+    const int temporalSupersamplingAA = 3;
+    const int temporalAntiAliasingAA = 4;
 
     MaterialConstants material = t_MaterialConstants[i_material];
 
