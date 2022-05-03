@@ -103,12 +103,13 @@ void ps_main(
     const int rawUpscaled = 1;
     const int temporalSupersamplingAA = 2;
     const int temporalAntiAliasingAA = 3;
+    const int nativeWithTAA = 6;
 
     float maximalConfidence;
     float3 curr = float3(0.0f, 0.0f, 0.0f);
     //float3 curr_normal = t_NormalBuffer.Sample(s_LinearSampler, i_position.xy * g_View.viewportSizeInv);
     float2 pixelOffset = g_View.pixelOffset;
-    float samplingRate = (b_FrameIndex.currentAAMode == nativeResolution ? 1.0f : g_SamplingRate.samplingRate);
+    float samplingRate = ((b_FrameIndex.currentAAMode == nativeResolution || b_FrameIndex.currentAAMode == nativeWithTAA) ? 1.0f : g_SamplingRate.samplingRate);
 
     //float3 color_1stmoment = float3(0.0f, 0.0f, 0.0f);
     //float3 color_2ndmoment = float3(0.0f, 0.0f, 0.0f);
@@ -203,12 +204,15 @@ void ps_main(
     case temporalAntiAliasingAA:
         blendAlpha = maximalConfidence * 0.1f;
         break;
+    case nativeWithTAA:
+        blendAlpha = maximalConfidence * 0.1f;
+        break;
     }
+    float3 hist = t_HistoryColor.Sample(s_AnisotropicSampler, prev_location).xyz;
     if (b_FrameIndex.frameHasReset == 0)
     {
         //if (all(prev_location >= float2(0.0f, 0.0f)) && all(prev_location <= float2(1.0f, 1.0f)))
         {
-            float3 hist = t_HistoryColor.Sample(s_AnisotropicSampler, prev_location).xyz;
             //float histLuminance = getLuminance(hist);
             //blendAlpha = (histLuminance > luminanceLowerbound && histLuminance < luminanceUpperbound) ? blendAlpha : 1.0f;
             //hist = max(color_lowerbound, hist);
@@ -217,7 +221,6 @@ void ps_main(
             blended = lerp(hist, curr, blendAlpha);
         }
     }
-
     //blended = color_upperbound;
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);

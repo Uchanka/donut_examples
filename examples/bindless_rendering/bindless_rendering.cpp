@@ -47,7 +47,7 @@ using namespace donut::math;
 
 static const char* g_WindowTitle = "Donut Example: Bindless Rendering";
 
-static enum AAMode { NATIVE_RESOLUTION, RAW_UPSCALED, TEMPORAL_SUPERSAMPLING, TEMPORAL_ANTIALIASING, FSR_WITHOUT_RCAS, FSR_WITH_RCAS, PLACE_HOLDER };
+static enum AAMode { NATIVE_RESOLUTION, RAW_UPSCALED, TEMPORAL_SUPERSAMPLING, TEMPORAL_ANTIALIASING, FSR_WITHOUT_RCAS, FSR_WITH_RCAS, NATIVE_WITH_TAA, PLACE_HOLDER };
 
 struct FSRConstants
 {
@@ -302,6 +302,9 @@ public:
         case FSR_WITH_RCAS:
             currentAAModeToStr = "FSR (Sharpened)";
             break;
+        case NATIVE_WITH_TAA:
+            currentAAModeToStr = "NATIVE TAA";
+            break;
         default:
             break;
         }
@@ -412,7 +415,10 @@ public:
             //return fixedMSAA4XPosition[frameIndex % (sizeof(fixedMSAA4XPosition) / sizeof(fixedMSAA4XPosition[0]))];
             //return float2(VanDerCorputSequence(clampedIndex, 2) - 0.5f, VanDerCorputSequence(clampedIndex, 3) - 0.5f);
         case TEMPORAL_ANTIALIASING:
-            return float2(VanDerCorputSequence(clampedIndex, 2) - 0.5f, VanDerCorputSequence(clampedIndex, 3) - 0.5f);
+            //return float2(VanDerCorputSequence(clampedIndex, 2) - 0.5f, VanDerCorputSequence(clampedIndex, 3) - 0.5f);
+            return Halton23Sequence(frameIndex) - float2(0.5f, 0.5f);
+        case NATIVE_WITH_TAA:
+            return Halton23Sequence(frameIndex) - float2(0.5f, 0.5f);
         default:
             return float2(.0f);
         }
@@ -700,7 +706,7 @@ public:
         uint32_t upsampledHeight = fbinfo.height;
         uint32_t renderWidth = upsampledWidth;
         uint32_t renderHeight = upsampledHeight;
-        if (m_currentAAMode != NATIVE_RESOLUTION)
+        if (m_currentAAMode != NATIVE_RESOLUTION && m_currentAAMode != NATIVE_WITH_TAA)
         {
             renderWidth *= m_slidingSamplingRate;
             renderHeight *= m_slidingSamplingRate;
@@ -825,7 +831,7 @@ public:
         {
             m_CommandList->copyTexture(m_ColorBuffer, nvrhi::TextureSlice(), m_FSRIntermediateBuffer, nvrhi::TextureSlice());
         }
-        else if (m_currentAAMode == TEMPORAL_ANTIALIASING || m_currentAAMode == TEMPORAL_SUPERSAMPLING)
+        else if (m_currentAAMode == TEMPORAL_ANTIALIASING || m_currentAAMode == TEMPORAL_SUPERSAMPLING || m_currentAAMode == NATIVE_WITH_TAA)
         {
             m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
         }
