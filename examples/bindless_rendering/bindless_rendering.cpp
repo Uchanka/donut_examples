@@ -106,6 +106,7 @@ private:
     
     //High-res
     nvrhi::TextureHandle m_ColorBuffer;
+    nvrhi::TextureHandle m_ColorBufferBackup;
     nvrhi::TextureHandle m_FSROutputBuffer;//rcas output
     nvrhi::TextureHandle m_HistoryColor;
     
@@ -135,6 +136,7 @@ private:
 
     app::FirstPersonCamera m_Camera;
     engine::PlanarView m_View;
+    std::string currentAAModeToStr;
     
     bool m_EnableAnimations = true;
     int m_currentAAMode = TEMPORAL_SUPERSAMPLING;
@@ -240,6 +242,10 @@ public:
         {
 
         }
+        if (key == GLFW_KEY_C)
+        {
+            captureCurrentFrame();
+        }
 
         return true;
     }
@@ -279,27 +285,27 @@ public:
         switch (m_currentAAMode)
         {
         case NATIVE_RESOLUTION:
-            extraInfoOnAAMode += " NATIVE";
+            currentAAModeToStr = "NATIVE";
             break;
         case RAW_UPSCALED:
-            extraInfoOnAAMode += " UPSCALED";
+            currentAAModeToStr = "UPSCALED";
             break;
         case TEMPORAL_SUPERSAMPLING:
-            extraInfoOnAAMode += " TSS";
+            currentAAModeToStr = "TSS";
             break;
         case TEMPORAL_ANTIALIASING:
-            extraInfoOnAAMode += " TAA";
+            currentAAModeToStr = "TAA";
             break;
         case FSR_WITHOUT_RCAS:
-            extraInfoOnAAMode += " FSR (Unsharpened)";
+            currentAAModeToStr = "FSR (Unsharpened)";
             break;
         case FSR_WITH_RCAS:
-            extraInfoOnAAMode += " FSR (Sharpened)";
+            currentAAModeToStr = "FSR (Sharpened)";
             break;
         default:
             break;
         }
-
+        extraInfoOnAAMode += currentAAModeToStr;
         GetDeviceManager()->SetInformativeWindowTitle(g_WindowTitle, extraInfoOnAAMode.c_str());
     }
 
@@ -427,6 +433,9 @@ public:
         textureDescHighRes.height = height;
         textureDescHighRes.dimension = nvrhi::TextureDimension::Texture2D;
         m_ColorBuffer = GetDevice()->createTexture(textureDescHighRes);
+
+        textureDescHighRes.debugName = "BackupContent";
+        m_ColorBufferBackup = GetDevice()->createTexture(textureDescHighRes);
 
         textureDescHighRes.isTypeless = false;
         textureDescHighRes.format = nvrhi::Format::RGBA16_FLOAT;
@@ -821,10 +830,17 @@ public:
             m_CommandList->copyTexture(m_HistoryColor, nvrhi::TextureSlice(), m_SSColorBuffer, nvrhi::TextureSlice());
         }
         m_CommonPasses->BlitTexture(m_CommandList, framebuffer, m_ColorBuffer, m_BindingCache.get());
+        m_CommandList->copyTexture(m_ColorBufferBackup, nvrhi::TextureSlice(), m_ColorBuffer, nvrhi::TextureSlice());
         clearUptheSignals();
 
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
+    }
+
+    void captureCurrentFrame()
+    {
+        std::string frameBmpName = "./Frame" + currentAAModeToStr + ".bmp";
+        donut::engine::SaveTextureToFile(GetDevice(), m_CommonPasses.get(), m_ColorBufferBackup, nvrhi::ResourceStates::RenderTarget, frameBmpName.c_str());
     }
 };
 
@@ -849,8 +865,8 @@ int main(int __argc, const char** __argv)
     deviceParams.enableNvrhiValidationLayer = true;
 #endif
     deviceParams.vsyncEnabled = true;
-    deviceParams.backBufferWidth = 1280;
-    deviceParams.backBufferHeight = 720;
+    deviceParams.backBufferWidth = 1920;
+    deviceParams.backBufferHeight = 1080;
 
     if (!deviceManager->CreateWindowDeviceAndSwapChain(deviceParams, g_WindowTitle))
     {
