@@ -407,6 +407,8 @@ public:
         {
         case NATIVE_RESOLUTION:
             return float2(.0f);
+        case NATIVE_WITH_TAA:
+            return Halton23Sequence(frameIndex) - float2(0.5f, 0.5f);
         case RAW_UPSCALED:
             return float2(.0f);
         case TEMPORAL_SUPERSAMPLING:
@@ -416,8 +418,6 @@ public:
             //return float2(VanDerCorputSequence(clampedIndex, 2) - 0.5f, VanDerCorputSequence(clampedIndex, 3) - 0.5f);
         case TEMPORAL_ANTIALIASING:
             //return float2(VanDerCorputSequence(clampedIndex, 2) - 0.5f, VanDerCorputSequence(clampedIndex, 3) - 0.5f);
-            return Halton23Sequence(frameIndex) - float2(0.5f, 0.5f);
-        case NATIVE_WITH_TAA:
             return Halton23Sequence(frameIndex) - float2(0.5f, 0.5f);
         default:
             return float2(.0f);
