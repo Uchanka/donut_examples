@@ -109,6 +109,10 @@ private:
     nvrhi::TextureHandle m_ColorBufferBackup;
     nvrhi::TextureHandle m_FSROutputBuffer;//rcas output
     nvrhi::TextureHandle m_HistoryColor;
+    //High-res, but UAV
+    nvrhi::TextureHandle m_ValidSampleCount;
+    nvrhi::TextureHandle m_FirstOrderMomentum;
+    nvrhi::TextureHandle m_SecondOrderMomentum;
     
     nvrhi::TextureHandle m_FSRIntermediateBuffer;//easu output, rcas input
     nvrhi::TextureHandle m_SSColorBuffer;
@@ -319,6 +323,9 @@ public:
         m_FSRInputBuffer = nullptr;
         m_FSROutputBuffer = nullptr;
         m_FSRIntermediateBuffer = nullptr;
+        m_FirstOrderMomentum = nullptr;
+        m_SecondOrderMomentum = nullptr;
+        m_ValidSampleCount = nullptr;
         m_SSColorBuffer = nullptr;
         m_HistoryColor = nullptr;
         m_HistoryNormal = nullptr;
@@ -464,9 +471,19 @@ public:
         textureDescHighRes.debugName = "SupersampledHistoryNormal";
         m_SSHistoryNormal = GetDevice()->createTexture(textureDescHighRes);
 
-        textureDescHighRes.format = nvrhi::Format::RGBA16_FLOAT;
         textureDescHighRes.debugName = "SupersampledMotionVector";
         m_SSMotionVector = GetDevice()->createTexture(textureDescHighRes);
+
+        textureDescHighRes.format = nvrhi::Format::R32_FLOAT;
+        textureDescHighRes.debugName = "SampleCount";
+        m_ValidSampleCount = GetDevice()->createTexture(textureDescHighRes);
+
+        textureDescHighRes.format = nvrhi::Format::RGBA32_FLOAT;
+        textureDescHighRes.debugName = "FirstOrderMoment";
+        m_FirstOrderMomentum = GetDevice()->createTexture(textureDescHighRes);
+
+        textureDescHighRes.debugName = "SecondOrderMoment";
+        m_SecondOrderMomentum = GetDevice()->createTexture(textureDescHighRes);
     }
 
     void createLowResolutionTextures(uint32_t width, uint32_t height)
@@ -572,6 +589,9 @@ public:
             nvrhi::BindingSetItem::Texture_SRV(2, m_JitteredColor, nvrhi::Format::RGBA16_FLOAT),
             nvrhi::BindingSetItem::Texture_SRV(3, m_NormalBuffer, nvrhi::Format::RGBA16_FLOAT),
             nvrhi::BindingSetItem::Texture_SRV(4, m_HistoryNormal, nvrhi::Format::RGBA16_FLOAT),
+            nvrhi::BindingSetItem::Texture_UAV(0, m_ValidSampleCount, nvrhi::Format::R32_FLOAT),
+            nvrhi::BindingSetItem::Texture_UAV(1, m_FirstOrderMomentum, nvrhi::Format::RGBA32_FLOAT),
+            nvrhi::BindingSetItem::Texture_UAV(2, m_SecondOrderMomentum, nvrhi::Format::RGBA32_FLOAT),
             nvrhi::BindingSetItem::Sampler(0, m_CommonPasses->m_AnisotropicClampSampler),
             nvrhi::BindingSetItem::Sampler(1, m_CommonPasses->m_LinearClampSampler),
             nvrhi::BindingSetItem::Sampler(2, m_CommonPasses->m_PointClampSampler)
@@ -688,15 +708,22 @@ public:
         m_CommandList->writeBuffer(m_FSRConstants, &fsrConsts, sizeof(fsrConsts));
     }
 
+    void clearStatsSignals()
+    {
+        m_CommandList->clearTextureFloat(m_ValidSampleCount, nvrhi::AllSubresources, 0.0f);
+        m_CommandList->clearTextureFloat(m_FirstOrderMomentum, nvrhi::AllSubresources, 0.0f);
+        m_CommandList->clearTextureFloat(m_SecondOrderMomentum, nvrhi::AllSubresources, 0.0f);
+    }
+
     void clearUptheSignals()
     {
-        m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_JitteredColor, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_SSColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_NormalBuffer, nvrhi::AllSubresources, nvrhi::Color(0.f));
-        m_CommandList->clearTextureFloat(m_HistoryNormal, nvrhi::AllSubresources, nvrhi::Color(0.f));
+        m_CommandList->clearTextureFloat(m_RenderMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+        m_CommandList->clearTextureFloat(m_SSMotionVector, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+        m_CommandList->clearTextureFloat(m_ColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+        m_CommandList->clearTextureFloat(m_JitteredColor, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+        m_CommandList->clearTextureFloat(m_SSColorBuffer, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+        m_CommandList->clearTextureFloat(m_NormalBuffer, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+        m_CommandList->clearTextureFloat(m_HistoryNormal, nvrhi::AllSubresources, nvrhi::Color(0.0f));
     }
 
     void Render(nvrhi::IFramebuffer* framebuffer) override
@@ -733,6 +760,10 @@ public:
 
         m_CommandList->open();
         
+        if (frameHasBeenReset)
+        {
+            clearStatsSignals();
+        }
         PlanarViewConstants viewConstants;
         fillRenderViewConstants(viewConstants, renderWidth, renderHeight);
 
