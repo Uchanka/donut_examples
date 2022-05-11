@@ -199,12 +199,14 @@ void ps_main(
     float3 hist = t_HistoryColor.Sample(s_AnisotropicSampler, prev_location).xyz;
     if (b_FrameIndex.frameHasReset == 0)
     {
+        float histLuminance = getLuminance(hist);
+        blendAlpha = (histLuminance > luminanceLowerbound && histLuminance < luminanceUpperbound) ? blendAlpha : 1.0f;
         hist = max(color_lowerbound, hist);
         hist = min(color_upperbound, hist);
 
         blended = lerp(hist, curr, blendAlpha);
     }
-    
+    //blended = color_upperbound;
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
 }
