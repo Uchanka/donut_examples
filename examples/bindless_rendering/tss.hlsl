@@ -105,10 +105,15 @@ void ps_main(
     const int temporalSupersamplingAA = 3;
     const int temporalAntiAliasingAA = 4;
 
-    float maximalConfidence = 0.0f;
+    float maximalConfidence;
     float3 curr = float3(0.0f, 0.0f, 0.0f);
     float2 pixelOffset = g_View.pixelOffset;
     float samplingRate = ((b_FrameIndex.currentAAMode == nativeResolution || b_FrameIndex.currentAAMode == nativeWithTAA) ? 1.0f : g_SamplingRate.samplingRate);
+
+    float3 color_lowerbound = float3(1.0f, 1.0f, 1.0f);
+    float3 color_upperbound = float3(0.0f, 0.0f, 0.0f);
+    float luminanceLowerbound = 1.0f;
+    float luminanceUpperbound = 0.0f;
 
     float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
     
@@ -136,6 +141,11 @@ void ps_main(
             float3 proximity_motion = t_MotionVector.Sample(s_LinearSampler, (i_position.xy + float2(dx, dy)) * g_View.viewportSizeInv).xyz;
 
             float probedSampleLuminance = getLuminance(probedJitteredSample);
+            color_lowerbound = min(probedJitteredSample, color_lowerbound);
+            color_upperbound = max(probedJitteredSample, color_upperbound);
+            luminanceLowerbound = min(luminanceLowerbound, probedSampleLuminance);
+            luminanceUpperbound = max(luminanceUpperbound, probedSampleLuminance);
+
             motion_1stmoment += proximity_motion;
         }
     }
@@ -189,8 +199,12 @@ void ps_main(
     float3 hist = t_HistoryColor.Sample(s_AnisotropicSampler, prev_location).xyz;
     if (b_FrameIndex.frameHasReset == 0)
     {
+        hist = max(color_lowerbound, hist);
+        hist = min(color_upperbound, hist);
+
         blended = lerp(hist, curr, blendAlpha);
     }
+    
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
 }
