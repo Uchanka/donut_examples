@@ -220,11 +220,11 @@ void ps_main(
             l2NormHist += dot(histVector, histVector);
         }
     }
-    float confidenceFactor = dotProduct * dotProduct / l2NormCurr * l2NormHist;
+    float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist);
     
     if (b_FrameIndex.frameHasReset == 0)
     {
-        blended = lerp(hist, curr, blendAlpha * confidenceFactor);
+        blended = lerp(hist[blockSize / 2][blockSize / 2], curr[blockSize / 2][blockSize / 2], blendAlpha * confidenceFactor);
     }
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
