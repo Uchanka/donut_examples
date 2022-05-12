@@ -178,10 +178,12 @@ void ps_main(
     }
 
     float dotProduct = 0.0f;
-    float l2NormCurr = 0.0f;
-    float l2NormHist = 0.0f;
+    float l2NormSqrdCurr = 0.0f;
+    float l2NormSqrdHist = 0.0f;
     float l1Difference = 0.0f;
-    float l2Difference = 0.0f;
+    float maximalL1Diff = 0.0f;
+    float l2DifferenceSqrd = 0.0f;
+    
     [unroll]
     for (int dk = -(blockSize / 2); dk <= (blockSize / 2); ++dk)
     {
@@ -194,12 +196,22 @@ void ps_main(
             float3 histVector = hist[shiftedIndexK][shiftedIndexL];
 
             dotProduct += dot(currVector, histVector);
-            l2NormCurr += dot(currVector, currVector);
-            l2NormHist += dot(histVector, histVector);
+            l2NormSqrdCurr += dot(currVector, currVector);
+            l2NormSqrdHist += dot(histVector, histVector);
+            float3 diffVector = abs(currVector - histVector);
+            float3 allOneVector = float3(1.0f, 1.0f, 1.0f);
+            l1Difference += dot(diffVector, allOneVector);
+            maximalL1Diff = dot(max(currVector, histVector), allOneVector);
+            l2DifferenceSqrd += dot(diffVector, diffVector);
         }
     }
+    float maximalL2DiffSqrd = l2NormSqrdCurr + l2NormSqrdHist;
+
     const float epsilon = 0.00001f;
-    float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);
+    //float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);//based on dot product
+    //float confidenceFactor = 1.0f - 1.0f * l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
+    float confidenceFactor = 1.0f - 1.0f * l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
+    //float confidenceFactor = 1.0f;//lmao
 
     float currentContribution = 0.1f;
     switch (b_FrameIndex.currentAAMode)
