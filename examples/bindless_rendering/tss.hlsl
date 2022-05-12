@@ -114,6 +114,7 @@ void ps_main(
     const float normalizationFactorBlock = 1.0f / (blockSize * blockSize);
     float3 curr[blockSize][blockSize];
     float3 hist[blockSize][blockSize];
+    float3 varSqrd[blockSize][blockSize];
     float maximalConfidence[blockSize][blockSize];
     [unroll]
     for (int di = -(blockSize / 2); di <= (blockSize / 2); ++di)
@@ -129,6 +130,9 @@ void ps_main(
             float maximumWeight = 0.0f;
             float normalizationFactor = 0.0f;
 
+            float3 localPatch1stMoment = float3(0.0f, 0.0f, 0.0f);
+            float3 localPatch2ndMoment = float3(0.0f, 0.0f, 0.0f);
+
             for (int dy = -(patchSize / 2); dy <= (patchSize / 2); ++dy)
             {
                 for (int dx = -(patchSize / 2); dx <= (patchSize / 2); ++dx)
@@ -136,7 +140,11 @@ void ps_main(
                     int2 probedSampleIndex = floorSampleIndex + int2(dx, dy);
                     float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
                     float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
+
                     float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 2.0f);
+
+                    localPatch1stMoment += probedJitteredSample;
+                    localPatch2ndMoment += probedJitteredSample * probedJitteredSample;
 
                     upsampledJitter += probedSampleWeight * probedJitteredSample.xyz;
                     normalizationFactor += probedSampleWeight;
@@ -154,8 +162,12 @@ void ps_main(
                 upsampledJitter *= normalizationFactor;
             }
             float3 curr_sample = float3(0.0f, 0.0f, 0.0f);
+
             int shiftedIndexI = di + blockSize / 2;
             int shiftedIndexJ = dj + blockSize / 2;
+
+            varSqrd[shiftedIndexI][shiftedIndexJ] = normalizationFactorPatch * localPatch2ndMoment - localPatch1stMoment * localPatch1stMoment;
+
             if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
             {
                 curr_sample = t_JitteredCurrentBuffer[int2(floor(shiftedIPosition * samplingRate))].xyz;
@@ -180,9 +192,13 @@ void ps_main(
     float dotProduct = 0.0f;
     float l2NormSqrdCurr = 0.0f;
     float l2NormSqrdHist = 0.0f;
+    float maNormSqrdDiff = 0.0f;
+    float maximalmaNormSqrd = 0.0f;
     float l1Difference = 0.0f;
     float maximalL1Diff = 0.0f;
     float l2DifferenceSqrd = 0.0f;
+
+    const float epsilon = 0.00001f;
     
     [unroll]
     for (int dk = -(blockSize / 2); dk <= (blockSize / 2); ++dk)
@@ -198,16 +214,26 @@ void ps_main(
             dotProduct += dot(currVector, histVector);
             l2NormSqrdCurr += dot(currVector, currVector);
             l2NormSqrdHist += dot(histVector, histVector);
+
             float3 diffVector = abs(currVector - histVector);
             float3 allOneVector = float3(1.0f, 1.0f, 1.0f);
+
             l1Difference += dot(diffVector, allOneVector);
             maximalL1Diff = dot(max(currVector, histVector), allOneVector);
-            l2DifferenceSqrd += dot(diffVector, diffVector);
+            float3 diffVectorSqrd = dot(diffVector, diffVector);
+            l2DifferenceSqrd += dot(diffVectorSqrd, allOneVector);
+
+            float3 allInvSigmaVector = varSqrd[shiftedIndexK][shiftedIndexL];
+            for (int comp = 0; comp < 3; ++comp)
+            {
+                allInvSigmaVector[comp] = allInvSigmaVector[comp] == 0.0f ? 1.0f / epsilon : 1.0f / allInvSigmaVector[comp];
+            }
+            maNormSqrdDiff += dot(diffVectorSqrd, allInvSigmaVector);
+            maximalmaNormSqrd += dot(l2NormSqrdCurr + l2NormSqrdHist, allInvSigmaVector);
         }
     }
     float maximalL2DiffSqrd = l2NormSqrdCurr + l2NormSqrdHist;
 
-    const float epsilon = 0.00001f;
     //float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);//based on dot product
     //float confidenceFactor = 1.0f - 1.0f * l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
     float confidenceFactor = 1.0f - 1.0f * l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
