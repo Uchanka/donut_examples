@@ -108,7 +108,7 @@ void ps_main(
     float2 pixelOffset = g_View.pixelOffset;
     float samplingRate = ((b_FrameIndex.currentAAMode == nativeResolution || b_FrameIndex.currentAAMode == nativeWithTAA) ? 1.0f : g_SamplingRate.samplingRate);
 
-    const int blockSize = 1;
+    const int blockSize = 5;
     const int patchSize = 3;
     const float normalizationFactorPatch = 1.0f / (patchSize * patchSize);
     const float normalizationFactorBlock = 1.0f / (blockSize * blockSize);
@@ -177,12 +177,11 @@ void ps_main(
         }
     }
 
-    float3 blended = float3(0.0f, 0.0f, 0.0f);
-    float blendAlpha = 1.0f;
-    
     float dotProduct = 0.0f;
     float l2NormCurr = 0.0f;
     float l2NormHist = 0.0f;
+    float l1Difference = 0.0f;
+    float l2Difference = 0.0f;
     [unroll]
     for (int dk = -(blockSize / 2); dk <= (blockSize / 2); ++dk)
     {
@@ -199,40 +198,46 @@ void ps_main(
             l2NormHist += dot(histVector, histVector);
         }
     }
-    float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist);
+    const float epsilon = 0.00001f;
+    float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);
 
+    float currentContribution = 0.1f;
     switch (b_FrameIndex.currentAAMode)
     {
     case nativeResolution:
-        blendAlpha = 1.0f;
+        currentContribution = 1.0f;
         break;
     case rawUpscaled:
-        blendAlpha = 1.0f;
+        currentContribution = 1.0f;
         break;
     case temporalSupersamplingAA:
-        blendAlpha = maximalConfidence[blockSize / 2][blockSize / 2] * 0.1f * confidenceFactor;
+        currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
         break;
     case temporalAntiAliasingAA:
-        blendAlpha = maximalConfidence[blockSize / 2][blockSize / 2] * 0.1f * confidenceFactor;
+        currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
         break;
     case nativeWithTAA:
-        blendAlpha = maximalConfidence[blockSize / 2][blockSize / 2] * 0.1f * confidenceFactor;
+        currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
         break;
     }
 
     float3 center_hist = hist[blockSize / 2][blockSize / 2];
     float3 center_curr = curr[blockSize / 2][blockSize / 2];
 
+    //confidenceFactor = 1.0f;
+    float historyContribution = (1.0f - currentContribution) * confidenceFactor;
+    currentContribution = 1.0f - historyContribution;
+    float3 blended = float3(0.0f, 0.0f, 0.0f);
     if (b_FrameIndex.frameHasReset == 0)
     {
-        blended = lerp(center_hist, center_curr, blendAlpha * confidenceFactor);
+        blended = center_hist * historyContribution + center_curr * currentContribution;
     }
     else
     {
         blended = center_curr;
     }
 
-    blended = center_curr;
+    //blended = center_curr;
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
 }
