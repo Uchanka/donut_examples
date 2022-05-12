@@ -291,6 +291,9 @@ public:
         case NATIVE_RESOLUTION:
             currentAAModeToStr = "NATIVE";
             break;
+        case NATIVE_WITH_TAA:
+            currentAAModeToStr = "NATIVE TAA";
+            break;
         case RAW_UPSCALED:
             currentAAModeToStr = "UPSCALED";
             break;
@@ -305,9 +308,6 @@ public:
             break;
         case FSR_WITH_RCAS:
             currentAAModeToStr = "FSR (Sharpened)";
-            break;
-        case NATIVE_WITH_TAA:
-            currentAAModeToStr = "NATIVE TAA";
             break;
         default:
             break;

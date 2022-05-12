@@ -105,16 +105,16 @@ void ps_main(
     const int temporalSupersamplingAA = 3;
     const int temporalAntiAliasingAA = 4;
 
-    float maximalConfidence = 0.0f;
     float2 pixelOffset = g_View.pixelOffset;
     float samplingRate = ((b_FrameIndex.currentAAMode == nativeResolution || b_FrameIndex.currentAAMode == nativeWithTAA) ? 1.0f : g_SamplingRate.samplingRate);
 
-    const int blockSize = 3;
+    const int blockSize = 1;
     const int patchSize = 3;
     const float normalizationFactorPatch = 1.0f / (patchSize * patchSize);
     const float normalizationFactorBlock = 1.0f / (blockSize * blockSize);
     float3 curr[blockSize][blockSize];
     float3 hist[blockSize][blockSize];
+    float maximalConfidence[blockSize][blockSize];
     [unroll]
     for (int di = -(blockSize / 2); di <= (blockSize / 2); ++di)
     {
@@ -123,7 +123,7 @@ void ps_main(
             float3 upsampledJitter = float3(0.0f, 0.0f, 0.0f);
             float2 shiftedIPosition = i_position.xy + float2(di, dj);
             float2 jitterSpaceSVPosition = samplingRate * shiftedIPosition;
-            int2 floorSampleIndex = int2(floor(jitterSpaceSVPosition.xy));
+            int2 floorSampleIndex = int2(floor(jitterSpaceSVPosition));
 
             float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
             float maximumWeight = 0.0f;
@@ -148,28 +148,25 @@ void ps_main(
                     motion_1stmoment += proximity_motion;
                 }
             }
-            if (maximumWeight == 0.0f)
-            {
-                upsampledJitter = float3(0.0f, 0.0f, 0.0f);
-            }
-            else
+            if (maximumWeight != 0.0f)
             {
                 normalizationFactor = 1.0f / normalizationFactor;
                 upsampledJitter *= normalizationFactor;
             }
+            float3 curr_sample = float3(0.0f, 0.0f, 0.0f);
             int shiftedIndexI = di + blockSize / 2;
             int shiftedIndexJ = dj + blockSize / 2;
-            float3 curr_sample = float3(0.0f, 0.0f, 0.0f);
             if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
             {
                 curr_sample = t_JitteredCurrentBuffer[int2(floor(shiftedIPosition * samplingRate))].xyz;
-                maximalConfidence = 1.0f;
+                maximalConfidence[shiftedIndexI][shiftedIndexJ] = 1.0f;
             }
             else
             {
                 curr_sample = upsampledJitter.xyz;
-                maximalConfidence = maximumWeight;
+                maximalConfidence[shiftedIndexI][shiftedIndexJ] = maximumWeight;
             }
+            
             curr[shiftedIndexI][shiftedIndexJ] = curr_sample;
 
             motion_1stmoment *= normalizationFactorPatch;
@@ -182,25 +179,7 @@ void ps_main(
 
     float3 blended = float3(0.0f, 0.0f, 0.0f);
     float blendAlpha = 1.0f;
-    switch (b_FrameIndex.currentAAMode)
-    {
-    case nativeResolution:
-        blendAlpha = 1.0f;
-        break;
-    case rawUpscaled:
-        blendAlpha = 1.0f;
-        break;
-    case temporalSupersamplingAA:
-        blendAlpha = maximalConfidence * 0.1f;
-        break;
-    case temporalAntiAliasingAA:
-        blendAlpha = maximalConfidence * 0.1f;
-        break;
-    case nativeWithTAA:
-        blendAlpha = maximalConfidence * 0.1f;
-        break;
-    }
-
+    
     float dotProduct = 0.0f;
     float l2NormCurr = 0.0f;
     float l2NormHist = 0.0f;
@@ -221,11 +200,39 @@ void ps_main(
         }
     }
     float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist);
-    
+
+    switch (b_FrameIndex.currentAAMode)
+    {
+    case nativeResolution:
+        blendAlpha = 1.0f;
+        break;
+    case rawUpscaled:
+        blendAlpha = 1.0f;
+        break;
+    case temporalSupersamplingAA:
+        blendAlpha = maximalConfidence[blockSize / 2][blockSize / 2] * 0.1f * confidenceFactor;
+        break;
+    case temporalAntiAliasingAA:
+        blendAlpha = maximalConfidence[blockSize / 2][blockSize / 2] * 0.1f * confidenceFactor;
+        break;
+    case nativeWithTAA:
+        blendAlpha = maximalConfidence[blockSize / 2][blockSize / 2] * 0.1f * confidenceFactor;
+        break;
+    }
+
+    float3 center_hist = hist[blockSize / 2][blockSize / 2];
+    float3 center_curr = curr[blockSize / 2][blockSize / 2];
+
     if (b_FrameIndex.frameHasReset == 0)
     {
-        blended = lerp(hist[blockSize / 2][blockSize / 2], curr[blockSize / 2][blockSize / 2], blendAlpha * confidenceFactor);
+        blended = lerp(center_hist, center_curr, blendAlpha * confidenceFactor);
     }
+    else
+    {
+        blended = center_curr;
+    }
+
+    blended = center_curr;
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
 }
