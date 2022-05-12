@@ -106,66 +106,80 @@ void ps_main(
     const int temporalAntiAliasingAA = 4;
 
     float maximalConfidence = 0.0f;
-    float3 curr = float3(0.0f, 0.0f, 0.0f);
     float2 pixelOffset = g_View.pixelOffset;
     float samplingRate = ((b_FrameIndex.currentAAMode == nativeResolution || b_FrameIndex.currentAAMode == nativeWithTAA) ? 1.0f : g_SamplingRate.samplingRate);
 
-    float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
-    
-    float3 upsampledJitter = float3(0.0f, 0.0f, 0.0f);
-    float2 jitterSpaceSVPosition = samplingRate * i_position.xy;
-    int2 floorSampleIndex = int2(floor(jitterSpaceSVPosition.x), floor(jitterSpaceSVPosition.y));
-    float maximumWeight = 0.0f;
-    float normalizationFactor = 0.0f;
-
+    const int blockSize = 3;
     const int patchSize = 3;
+    const float normalizationFactorPatch = 1.0f / (patchSize * patchSize);
+    const float normalizationFactorBlock = 1.0f / (blockSize * blockSize);
+    float3 curr[blockSize][blockSize];
+    float3 hist[blockSize][blockSize];
     [unroll]
-    for (int dy = -(patchSize / 2); dy <= (patchSize / 2); ++dy)
+    for (int di = -(blockSize / 2); di <= (blockSize / 2); ++di)
     {
-        for (int dx = -(patchSize / 2); dx <= (patchSize / 2); ++dx)
+        for (int dj = -(blockSize / 2); dj <= (blockSize / 2); ++dj)
         {
-            int2 probedSampleIndex = floorSampleIndex + int2(dx, dy);
-            float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
-            float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
-            float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 2.0f);
+            float3 upsampledJitter = float3(0.0f, 0.0f, 0.0f);
+            float2 shiftedIPosition = i_position.xy + float2(di, dj);
+            float2 jitterSpaceSVPosition = samplingRate * shiftedIPosition;
+            int2 floorSampleIndex = int2(floor(jitterSpaceSVPosition.xy));
 
-            upsampledJitter += probedSampleWeight * probedJitteredSample.xyz;
-            normalizationFactor += probedSampleWeight;
-            maximumWeight = max(maximumWeight, probedSampleWeight);
+            float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
+            float maximumWeight = 0.0f;
+            float normalizationFactor = 0.0f;
 
-            float3 proximity_motion = t_MotionVector.Sample(s_LinearSampler, (i_position.xy + float2(dx, dy)) * g_View.viewportSizeInv).xyz;
+            for (int dy = -(patchSize / 2); dy <= (patchSize / 2); ++dy)
+            {
+                for (int dx = -(patchSize / 2); dx <= (patchSize / 2); ++dx)
+                {
+                    int2 probedSampleIndex = floorSampleIndex + int2(dx, dy);
+                    float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
+                    float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
+                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 2.0f);
 
-            float probedSampleLuminance = getLuminance(probedJitteredSample);
-            motion_1stmoment += proximity_motion;
+                    upsampledJitter += probedSampleWeight * probedJitteredSample.xyz;
+                    normalizationFactor += probedSampleWeight;
+                    maximumWeight = max(maximumWeight, probedSampleWeight);
+
+                    float3 proximity_motion = t_MotionVector.Sample(s_LinearSampler, (shiftedIPosition + float2(dx, dy)) * g_View.viewportSizeInv).xyz;
+
+                    float probedSampleLuminance = getLuminance(probedJitteredSample);
+                    motion_1stmoment += proximity_motion;
+                }
+            }
+            if (maximumWeight == 0.0f)
+            {
+                upsampledJitter = float3(0.0f, 0.0f, 0.0f);
+            }
+            else
+            {
+                normalizationFactor = 1.0f / normalizationFactor;
+                upsampledJitter *= normalizationFactor;
+            }
+            int shiftedIndexI = di + blockSize / 2;
+            int shiftedIndexJ = dj + blockSize / 2;
+            float3 curr_sample = float3(0.0f, 0.0f, 0.0f);
+            if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
+            {
+                curr_sample = t_JitteredCurrentBuffer[int2(floor(shiftedIPosition * samplingRate))].xyz;
+                maximalConfidence = 1.0f;
+            }
+            else
+            {
+                curr_sample = upsampledJitter.xyz;
+                maximalConfidence = maximumWeight;
+            }
+            curr[shiftedIndexI][shiftedIndexJ] = curr_sample;
+
+            motion_1stmoment *= normalizationFactorPatch;
+            float2 prev_location = shiftedIPosition * g_View.viewportSizeInv - motion_1stmoment.xy;
+            //float3 prev_normal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prev_location));
+            float3 prev_sample = t_HistoryColor.Sample(s_AnisotropicSampler, prev_location).xyz;
+            hist[shiftedIndexI][shiftedIndexJ] = prev_sample;
         }
     }
-    if (maximumWeight == 0.0f)
-    {
-        upsampledJitter = float3(0.0f, 0.0f, 0.0f);
-    }
-    else
-    {
-        normalizationFactor = 1.0f / normalizationFactor;
-        upsampledJitter *= normalizationFactor;
-    }
 
-    if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
-    {
-        curr = t_JitteredCurrentBuffer[int2(floor(i_position.x * samplingRate), floor(i_position.y * samplingRate))].xyz;
-        maximalConfidence = 1.0f;
-    }
-    else
-    {
-        curr = upsampledJitter.xyz;
-        maximalConfidence = maximumWeight;
-    }
-
-    const float normalizationFactorPatch = 1.0f / (patchSize * patchSize);
-    motion_1stmoment *= normalizationFactorPatch;
-
-    float2 prev_location = i_position.xy * g_View.viewportSizeInv - motion_1stmoment.xy;
-    float3 prev_normal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prev_location));
-    
     float3 blended = float3(0.0f, 0.0f, 0.0f);
     float blendAlpha = 1.0f;
     switch (b_FrameIndex.currentAAMode)
@@ -186,10 +200,31 @@ void ps_main(
         blendAlpha = maximalConfidence * 0.1f;
         break;
     }
-    float3 hist = t_HistoryColor.Sample(s_AnisotropicSampler, prev_location).xyz;
+
+    float dotProduct = 0.0f;
+    float l2NormCurr = 0.0f;
+    float l2NormHist = 0.0f;
+    [unroll]
+    for (int dk = -(blockSize / 2); dk <= (blockSize / 2); ++dk)
+    {
+        for (int dl = -(blockSize / 2); dl <= (blockSize / 2); ++dl)
+        {
+            int shiftedIndexK = dk + blockSize / 2;
+            int shiftedIndexL = dl + blockSize / 2;
+
+            float3 currVector = curr[shiftedIndexK][shiftedIndexL];
+            float3 histVector = hist[shiftedIndexK][shiftedIndexL];
+
+            dotProduct += dot(currVector, histVector);
+            l2NormCurr += dot(currVector, currVector);
+            l2NormHist += dot(histVector, histVector);
+        }
+    }
+    float confidenceFactor = dotProduct * dotProduct / l2NormCurr * l2NormHist;
+    
     if (b_FrameIndex.frameHasReset == 0)
     {
-        blended = lerp(hist, curr, blendAlpha);
+        blended = lerp(hist, curr, blendAlpha * confidenceFactor);
     }
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
