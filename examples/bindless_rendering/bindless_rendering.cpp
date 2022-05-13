@@ -816,7 +816,7 @@ public:
             }
 
             nvrhi::DrawArguments argsPost;
-            argsPost.vertexCount = 6;
+            argsPost.vertexCount = 3;
             m_CommandList->draw(argsPost);
         }
         else

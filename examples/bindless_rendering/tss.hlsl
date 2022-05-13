@@ -48,24 +48,16 @@ SamplerState s_NearestSampler : register(s2);
 
 static const float2 g_positions[] =
 {
-    float2(-1.0f, 1.0f),
-    float2(1.0f, 1.0f),
-    float2(-1.0f, -1.0f),
-
-    float2(1.0f, 1.0f),
-    float2(-1.0f, -1.0f),
+    float2(1.0f, 3.0f),
+    float2(-3.0f, -1.0f),
     float2(1.0f, -1.0f)
 };
 
 static const float2 g_uvs[] =
 {
-    float2(0.0f, 0.0f),
-    float2(1.0f, 0.0f),
-    float2(0.0f, 1.0f),
-
-    float2(1.0f, 0.0f),
-    float2(0.0f, 1.0f),
-    float2(1.0f, 1.0f)
+    float2(1.0f, 2.0f),
+    float2(-1.0f, 0.0f),
+    float2(1.0f, 0.0f)
 };
 
 float getLuminance(float3 color)
