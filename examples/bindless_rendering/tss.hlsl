@@ -166,7 +166,8 @@ void ps_main(
             int shiftedIndexI = di + blockSize / 2;
             int shiftedIndexJ = dj + blockSize / 2;
 
-            varSqrd[shiftedIndexI][shiftedIndexJ] = normalizationFactorPatch * localPatch2ndMoment - localPatch1stMoment * localPatch1stMoment;
+            float3 estimatedExpectancy = normalizationFactorPatch * localPatch1stMoment;
+            varSqrd[shiftedIndexI][shiftedIndexJ] = normalizationFactorPatch * localPatch2ndMoment - estimatedExpectancy * estimatedExpectancy;
 
             if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
             {
@@ -197,9 +198,11 @@ void ps_main(
     float l1Difference = 0.0f;
     float maximalL1Diff = 0.0f;
     float l2DifferenceSqrd = 0.0f;
+    float infDifference = 0.0f;
+    float maximalInfDifference = 0.0f;
 
     const float epsilon = 0.00001f;
-    
+
     [unroll]
     for (int dk = -(blockSize / 2); dk <= (blockSize / 2); ++dk)
     {
@@ -219,24 +222,26 @@ void ps_main(
             float3 allOneVector = float3(1.0f, 1.0f, 1.0f);
 
             l1Difference += dot(diffVector, allOneVector);
-            maximalL1Diff = dot(max(currVector, histVector), allOneVector);
-            float3 diffVectorSqrd = dot(diffVector, diffVector);
-            l2DifferenceSqrd += dot(diffVectorSqrd, allOneVector);
+            maximalL1Diff += dot(max(currVector, histVector), allOneVector);
+            l2DifferenceSqrd += dot(diffVector, diffVector);
 
             float3 allInvSigmaVector = varSqrd[shiftedIndexK][shiftedIndexL];
-            for (int comp = 0; comp < 3; ++comp)
+            for (int comp = 0; comp < sizeof(allInvSigmaVector) / sizeof(allInvSigmaVector[0]); ++comp)
             {
-                allInvSigmaVector[comp] = allInvSigmaVector[comp] == 0.0f ? 1.0f / epsilon : 1.0f / allInvSigmaVector[comp];
+                float sigmaComponent = 1.0f / allInvSigmaVector[comp];
+                allInvSigmaVector[comp] = (sigmaComponent == 0.0f) ? 1.0f : 1.0f / sigmaComponent;
             }
-            maNormSqrdDiff += dot(diffVectorSqrd, allInvSigmaVector);
-            maximalmaNormSqrd += dot(l2NormSqrdCurr + l2NormSqrdHist, allInvSigmaVector);
+            maNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaVector);
+            maximalmaNormSqrd += dot(currVector * currVector, allInvSigmaVector);
+            maximalmaNormSqrd += dot(histVector * histVector, allInvSigmaVector);
         }
     }
     float maximalL2DiffSqrd = l2NormSqrdCurr + l2NormSqrdHist;
 
     //float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);//based on dot product
-    //float confidenceFactor = 1.0f - 1.0f * l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
-    float confidenceFactor = 1.0f - 1.0f * l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
+    //float confidenceFactor = 1.0f - l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
+    float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
+    //float confidenceFactor = 1.0f - maNormSqrdDiff / (maximalmaNormSqrd + epsilon);//based on ma correspondence
     //float confidenceFactor = 1.0f;//lmao
 
     float currentContribution = 0.1f;
@@ -275,6 +280,7 @@ void ps_main(
         blended = center_curr;
     }
 
+    //blended = varSqrd[blockSize / 2][blockSize / 2];
     //blended = center_curr;
     current_buffer = float4(blended, 1.0f);
     color_buffer = float4(blended, 1.0f);
