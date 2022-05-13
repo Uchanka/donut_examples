@@ -240,6 +240,7 @@ void ps_main(
     //float confidenceFactor = 1.0f;//lmao
 
     float currentContribution = 0.1f;
+    float historyContribution = 1.0f - currentContribution;
     switch (b_FrameIndex.currentAAMode)
     {
     case nativeResolution:
@@ -258,17 +259,16 @@ void ps_main(
         currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
         break;
     }
+    historyContribution *= confidenceFactor;
 
     float3 center_hist = hist[blockSize / 2][blockSize / 2];
     float3 center_curr = curr[blockSize / 2][blockSize / 2];
 
-    //confidenceFactor = 1.0f;
-    float historyContribution = (1.0f - currentContribution) * confidenceFactor;
-    currentContribution = 1.0f - historyContribution;
     float3 blended = float3(0.0f, 0.0f, 0.0f);
     if (b_FrameIndex.frameHasReset == 0)
     {
-        blended = center_hist * historyContribution + center_curr * currentContribution;
+        float linearizationFactor = 1.0f / (historyContribution + currentContribution);
+        blended = (center_hist * historyContribution + center_curr * currentContribution) * linearizationFactor;
     }
     else
     {
