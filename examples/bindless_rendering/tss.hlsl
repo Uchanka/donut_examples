@@ -199,8 +199,7 @@ void ps_main(
     float maximalL1Diff = 0.0f;
     float l2DifferenceSqrd = 0.0f;
     float infDifference = 0.0f;
-    float maximalInfDifference = 0.0f;
-
+    
     const float epsilon = 0.00001f;
 
     [unroll]
@@ -224,12 +223,14 @@ void ps_main(
             l1Difference += dot(diffVector, allOneVector);
             maximalL1Diff += dot(max(currVector, histVector), allOneVector);
             l2DifferenceSqrd += dot(diffVector, diffVector);
-
+            
             float3 allInvSigmaVector = varSqrd[shiftedIndexK][shiftedIndexL];
             for (int comp = 0; comp < sizeof(allInvSigmaVector) / sizeof(allInvSigmaVector[0]); ++comp)
             {
                 float sigmaComponent = 1.0f / allInvSigmaVector[comp];
                 allInvSigmaVector[comp] = (sigmaComponent == 0.0f) ? 1.0f : 1.0f / sigmaComponent;
+                float absDiffComponent = diffVector[comp];
+                infDifference = absDiffComponent > infDifference ? absDiffComponent : infDifference;
             }
             maNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaVector);
             maximalmaNormSqrd += dot(currVector * currVector, allInvSigmaVector);
@@ -237,10 +238,12 @@ void ps_main(
         }
     }
     float maximalL2DiffSqrd = l2NormSqrdCurr + l2NormSqrdHist;
+    float maximalInfDifference = 1.0f;
 
     //float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);//based on dot product
     //float confidenceFactor = 1.0f - l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
     float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
+    //float confidenceFactor = 1.0f - infDifference / maximalInfDifference;//based on linf correspondence
     //float confidenceFactor = 1.0f - maNormSqrdDiff / (maximalmaNormSqrd + epsilon);//based on ma correspondence
     //float confidenceFactor = 1.0f;//lmao
 
