@@ -209,7 +209,18 @@ void ps_main(
             l2NormSqrdCurr += dot(currVector, currVector);
             l2NormSqrdHist += dot(histVector, histVector);
 
-            float3 diffVector = abs(currVector - histVector);
+            float3 diffVector = float3(0.0f, 0.0f, 0.0f);
+            for (int dm = -1; dm <= 1; ++dm)
+            {
+                float factorY = (dm == 0) ? 0.5f : 0.25f;
+                int convIndexY = clamp(dm + dk, 0, 3);
+                for (int dn = -1; dn <= 1; ++dn)
+                {
+                    float factorX = (dn == 0) ? 0.5f : 0.25f;
+                    int convIndexX = clamp(dn + dl, 0, 3);
+                    diffVector += factorX * factorY * abs(hist[convIndexX][convIndexY] - curr[convIndexX][convIndexY]);
+                }
+            }
             float3 allOneVector = float3(1.0f, 1.0f, 1.0f);
 
             l1Difference += dot(diffVector, allOneVector);
@@ -262,7 +273,6 @@ void ps_main(
     float3 center_hist = hist[blockSize / 2][blockSize / 2];
     float3 center_curr = curr[blockSize / 2][blockSize / 2];
 
-    //confidenceFactor = 1.0f;
     float historyContribution = (1.0f - currentContribution) * confidenceFactor;
     currentContribution = 1.0f - historyContribution;
     float3 blended = float3(0.0f, 0.0f, 0.0f);
