@@ -42,6 +42,10 @@ Texture2D<float4> t_JitteredCurrentBuffer : register(t2);
 Texture2D<float3> t_NormalBuffer : register(t3);
 Texture2D<float3> t_HistoryNormal : register(t4);
 
+RWTexture2D<float4> t_ValidSamples : register(u0);
+RWTexture2D<float4> t_1stOrderMoment : register(u1);
+RWTexture2D<float4> t_2ndOrderMoment : register(u2);
+
 SamplerState s_AnisotropicSampler : register(s0);
 SamplerState s_LinearSampler : register(s1);
 SamplerState s_NearestSampler : register(s2);
@@ -209,18 +213,23 @@ void ps_main(
             l2NormSqrdCurr += dot(currVector, currVector);
             l2NormSqrdHist += dot(histVector, histVector);
 
-            float3 diffVector = float3(0.0f, 0.0f, 0.0f);
-            for (int dm = -1; dm <= 1; ++dm)
+            //float3 diffVector = float3(0.0f, 0.0f, 0.0f);
+            float3 diffVector = abs(currVector - histVector);
+            /*for (int dm = -1; dm <= 1; ++dm)
             {
                 float factorY = (dm == 0) ? 0.5f : 0.25f;
-                int convIndexY = clamp(dm + dk, 0, 3);
+                int convIndexY = dm + dk;
+                convIndexY = convIndexY >= 0 ? convIndexY : -convIndexY;
+                convIndexY = convIndexY < blockSize ? convIndexY : 2 * blockSize - convIndexY;
                 for (int dn = -1; dn <= 1; ++dn)
                 {
                     float factorX = (dn == 0) ? 0.5f : 0.25f;
-                    int convIndexX = clamp(dn + dl, 0, 3);
+                    int convIndexX = dn + dl;
+                    convIndexX = convIndexX >= 0 ? convIndexX : -convIndexX;
+                    convIndexX = convIndexX < blockSize ? convIndexX : 2 * blockSize - convIndexX;
                     diffVector += factorX * factorY * abs(hist[convIndexX][convIndexY] - curr[convIndexX][convIndexY]);
                 }
-            }
+            }*/
             float3 allOneVector = float3(1.0f, 1.0f, 1.0f);
 
             l1Difference += dot(diffVector, allOneVector);
