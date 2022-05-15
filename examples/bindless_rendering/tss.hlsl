@@ -161,7 +161,7 @@ void ps_main(
         for (int dj = -(blockSize / 2); dj <= (blockSize / 2); ++dj)
         {
             float2 shiftedIPosition = i_position.xy + float2(di, dj);
-            float2 jitterSpaceSVPosition = samplingRate * shiftedIPosition;
+            float2 jitterSpaceSVPosition = samplingRate * shiftedIPosition + pixelOffset + float2(0.5f, 0.5f);
             
             float3 motionVector = t_MotionVector.Sample(s_LinearSampler, (shiftedIPosition) * g_View.viewportSizeInv).xyz;
             
@@ -284,7 +284,7 @@ void ps_main(
     float3 blended = float3(0.0f, 0.0f, 0.0f);
     if (b_FrameIndex.frameHasReset == 0)
     {
-        blended = centerHist * historyContribution + centerCurr * currentContribution;
+        blended = centerHist * 0.9f + centerCurr * 0.1f;
     }
     else
     {
