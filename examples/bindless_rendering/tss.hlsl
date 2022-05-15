@@ -284,7 +284,7 @@ void ps_main(
     float3 blended = float3(0.0f, 0.0f, 0.0f);
     if (b_FrameIndex.frameHasReset == 0)
     {
-        blended = centerHist * historyContribution + centerCurr * currentContribution;
+        blended = centerHist * 0.9f + centerCurr * 0.1f;
     }
     else
     {
