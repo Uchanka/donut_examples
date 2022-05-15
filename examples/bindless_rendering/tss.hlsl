@@ -89,45 +89,55 @@ float tentValue(float2 center, float2 position, float tentWidth)
     return contributionX * contributionY;
 }
 
-float4 sampleTextureCatmullRom(in Texture2D<float4> tex, in float2 samplePos)
+float4 sampleTextureCatmullRom(in Texture2D<float4> tex, in float2 samplePos, float rate)
 {
-    float2 texPos1 = floor(samplePos - 0.5f) + 0.5f;
+    int2 texIndex1 = int2(floor(samplePos - float2(0.5f, 0.5f)));
 
-    float2 f = samplePos - texPos1;
+    float2 t = samplePos - texIndex1 - float2(1.0f, 1.0f);
+    float2 t0 = -1.5f;
+    float2 t1 = -0.5f;
+    float2 t2 = 0.5f;
+    float2 t3 = 1.5f;
+    float regulator = 2.0f;
 
-    float2 w0 = f * (-0.5f + f * (1.0f - 0.5f * f));
-    float2 w1 = 1.0f + f * f * (-2.5f + 1.5f * f);
-    float2 w2 = f * (0.5f + f * (2.0f - 1.5f * f));
-    float2 w3 = f * f * (-0.5f + 0.5f * f);
+    float2 w0 = (t2 - t) * (t2 - t) * (t1 - t);
+    float2 w1 = (t3 - t) * (t2 - t) * (t - t1) + 2.0f * (t2 - t) * (t2 - t) * (t - t0);
+    float2 w2 = (t - t1) * (t - t0) * (t2 - t) + 2.0f * (t1 - t) * (t1 - t) * (t3 - t);
+    float2 w3 = (t - t2) * (t1 - t) * (t1 - t);
+
+    w0 /= regulator;
+    w1 /= regulator;
+    w2 /= regulator;
+    w3 /= regulator;
 
     float2 maximalW = max(w0, max(w1, max(w2, w3)));
     float maximalWeight = max(maximalW.x, maximalW.y);
     maximalWeight *= maximalWeight;
 
-    float2 texPos0 = texPos1 - 1;
-    float2 texPos2 = texPos1 + 1;
-    float2 texPos3 = texPos1 + 2;
+    int2 texIndex0 = texIndex1 - 1;
+    int2 texIndex2 = texIndex1 + 1;
+    int2 texIndex3 = texIndex1 + 2;
 
     float4 result = 0.0f;
-    result += tex[int2(texPos0.x, texPos0.y)] * w0.x * w0.y;
-    result += tex[int2(texPos1.x, texPos0.y)] * w1.x * w0.y;
-    result += tex[int2(texPos2.x, texPos0.y)] * w2.x * w0.y;
-    result += tex[int2(texPos3.x, texPos0.y)] * w3.x * w0.y;
+    result += tex[int2(texIndex0.x, texIndex0.y)] * w0.x * w0.y;
+    result += tex[int2(texIndex1.x, texIndex0.y)] * w1.x * w0.y;
+    result += tex[int2(texIndex2.x, texIndex0.y)] * w2.x * w0.y;
+    result += tex[int2(texIndex3.x, texIndex0.y)] * w3.x * w0.y;
 
-    result += tex[int2(texPos0.x, texPos1.y)] * w0.x * w1.y;
-    result += tex[int2(texPos1.x, texPos1.y)] * w1.x * w1.y;
-    result += tex[int2(texPos2.x, texPos1.y)] * w2.x * w1.y;
-    result += tex[int2(texPos3.x, texPos1.y)] * w3.x * w1.y;
+    result += tex[int2(texIndex0.x, texIndex1.y)] * w0.x * w1.y;
+    result += tex[int2(texIndex1.x, texIndex1.y)] * w1.x * w1.y;
+    result += tex[int2(texIndex2.x, texIndex1.y)] * w2.x * w1.y;
+    result += tex[int2(texIndex3.x, texIndex1.y)] * w3.x * w1.y;
 
-    result += tex[int2(texPos0.x, texPos2.y)] * w0.x * w2.y;
-    result += tex[int2(texPos1.x, texPos2.y)] * w1.x * w2.y;
-    result += tex[int2(texPos2.x, texPos2.y)] * w2.x * w2.y;
-    result += tex[int2(texPos3.x, texPos2.y)] * w3.x * w2.y;
+    result += tex[int2(texIndex0.x, texIndex2.y)] * w0.x * w2.y;
+    result += tex[int2(texIndex1.x, texIndex2.y)] * w1.x * w2.y;
+    result += tex[int2(texIndex2.x, texIndex2.y)] * w2.x * w2.y;
+    result += tex[int2(texIndex3.x, texIndex2.y)] * w3.x * w2.y;
 
-    result += tex[int2(texPos0.x, texPos3.y)] * w0.x * w3.y;
-    result += tex[int2(texPos1.x, texPos3.y)] * w1.x * w3.y;
-    result += tex[int2(texPos2.x, texPos3.y)] * w2.x * w3.y;
-    result += tex[int2(texPos3.x, texPos3.y)] * w3.x * w3.y;
+    result += tex[int2(texIndex0.x, texIndex3.y)] * w0.x * w3.y;
+    result += tex[int2(texIndex1.x, texIndex3.y)] * w1.x * w3.y;
+    result += tex[int2(texIndex2.x, texIndex3.y)] * w2.x * w3.y;
+    result += tex[int2(texIndex3.x, texIndex3.y)] * w3.x * w3.y;
 
     return float4(result.xyz, maximalWeight);
 }
@@ -168,7 +178,7 @@ void ps_main(
             float3 localPatch1stMoment = float3(0.0f, 0.0f, 0.0f);
             float3 localPatch2ndMoment = float3(0.0f, 0.0f, 0.0f);
 
-            float4 filteredCurrent = sampleTextureCatmullRom(t_JitteredCurrentBuffer, jitterSpaceSVPosition);
+            float4 filteredCurrent = sampleTextureCatmullRom(t_JitteredCurrentBuffer, jitterSpaceSVPosition, 1.0f / 1.0f);
             float maximumWeight = filteredCurrent.w;
             
             float3 currSample = float3(0.0f, 0.0f, 0.0f);
@@ -251,10 +261,10 @@ void ps_main(
 
     //float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);//based on dot product
     //float confidenceFactor = 1.0f - l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
-    //float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
+    float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
     //float confidenceFactor = 1.0f - infDifference / maximalInfDifference;//based on linf correspondence
     //float confidenceFactor = 1.0f - maNormSqrdDiff / (maximalmaNormSqrd + epsilon);//based on ma correspondence
-    float confidenceFactor = 1.0f;//lmao
+    //float confidenceFactor = 1.0f;//lmao
 
     float currentContribution = 0.1f;
     switch (b_FrameIndex.currentAAMode)
