@@ -42,7 +42,7 @@ Texture2D<float4> t_JitteredCurrentBuffer : register(t2);
 Texture2D<float3> t_NormalBuffer : register(t3);
 Texture2D<float3> t_HistoryNormal : register(t4);
 
-RWTexture2D<float4> t_ValidSamples : register(u0);
+RWTexture2D<float> t_ValidSamples : register(u0);
 RWTexture2D<float4> t_1stOrderMoment : register(u1);
 RWTexture2D<float4> t_2ndOrderMoment : register(u2);
 
@@ -119,9 +119,9 @@ float cubicBSpline(float2 center, float2 position, float h)
 }
 
 void ps_main(
-    in float4 iPosition : SV_Position,
-    out float4 colorBuffer : SV_Target0,
-    out float4 currentBuffer : SV_Target1)
+    in float4 i_Position : SV_Position,
+    out float4 o_ColorBuffer : SV_Target0,
+    out float4 o_CurrentBuffer : SV_Target1)
 {
     const int nativeResolution = 0;
     const int nativeWithTAA = 1;
@@ -147,7 +147,7 @@ void ps_main(
         for (int dj = -(blockSize / 2); dj <= (blockSize / 2); ++dj)
         {
             float3 upsampledJitter = float3(0.0f, 0.0f, 0.0f);
-            float2 shiftedIPosition = iPosition.xy + float2(di, dj);
+            float2 shiftedIPosition = i_Position.xy + float2(di, dj);
             float2 jitterSpaceSVPosition = samplingRate * shiftedIPosition;
             int2 floorSampleIndex = int2(floor(jitterSpaceSVPosition));
 
@@ -326,8 +326,20 @@ void ps_main(
         blended = currentContribution * centerCurr + historyContribution * centerHist;
     }
 
-    //blended = varSqrd[blockSize / 2][blockSize / 2];
-    //blended = center_curr;
-    currentBuffer = float4(blended, 1.0f);
-    colorBuffer = float4(blended, 1.0f);
+    int2 momentTexelIndex = int2(floor(i_Position.xy));
+    
+    float3 firstOrder = t_1stOrderMoment[momentTexelIndex].xyz;
+    float3 secondOrder = t_2ndOrderMoment[momentTexelIndex].xyz;
+
+    firstOrder = (1.0f - currentContribution) * firstOrder + currentContribution * blended;
+    secondOrder = (1.0f - currentContribution) * secondOrder + currentContribution * blended * blended;
+
+    t_1stOrderMoment[momentTexelIndex] = float4(firstOrder, 0.0f);
+    t_2ndOrderMoment[momentTexelIndex] = float4(secondOrder, 0.0f);
+
+    float3 expectancy = firstOrder;
+    float3 variance = secondOrder - expectancy * expectancy;
+
+    o_CurrentBuffer = float4(blended, 1.0f);
+    o_ColorBuffer = float4(blended, 1.0f);
 }
