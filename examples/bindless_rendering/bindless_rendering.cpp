@@ -144,7 +144,7 @@ private:
     
     bool m_EnableAnimations = true;
     int m_currentAAMode = TEMPORAL_SUPERSAMPLING;
-    float m_slidingSamplingRate = 0.75f;
+    float m_slidingSamplingRate = 1.0f / 1.5f;
     float m_WallclockTime = 0.f;
 
 public:

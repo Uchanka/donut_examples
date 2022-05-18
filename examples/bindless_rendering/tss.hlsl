@@ -89,11 +89,39 @@ float tentValue(float2 center, float2 position, float tentWidth)
     return contributionX * contributionY;
 }
 
+float cubicBSpline(float2 center, float2 position, float h)
+{
+    float2 x = (position - center) / h;
+    float2 absx = abs(x);
+    float2 xsqr = x * x;
+    float2 absxcubic = xsqr * absx;
+    float Nx = 0.0f;
+    float Ny = 0.0f;
+
+    if (x.x < 1.0f)
+    {
+        Nx = 0.5 * absxcubic.x - xsqr.x + 2.0f / 3.0f;
+    }
+    else if (x.x < 2.0f)
+    {
+        Nx = -1.0f / 6.0f * absxcubic.x + xsqr.x - 2.0f * absx.x + 4.0f / 3.0f;
+    }
+    if (x.y < 1.0f)
+    {
+        Ny = 0.5 * absxcubic.y - xsqr.y + 2.0f / 3.0f;
+    }
+    else if (x.y < 2.0f)
+    {
+        Ny = -1.0f / 6.0f * absxcubic.y + xsqr.y - 2.0f * absx.y + 4.0f / 3.0f;
+    }
+
+    return Nx * Ny;
+}
+
 void ps_main(
-    in float4 i_position : SV_Position,
-    in float2 i_uv_coord : TEXTURE_COORD,
-    out float4 color_buffer : SV_Target0,
-    out float4 current_buffer : SV_Target1)
+    in float4 iPosition : SV_Position,
+    out float4 colorBuffer : SV_Target0,
+    out float4 currentBuffer : SV_Target1)
 {
     const int nativeResolution = 0;
     const int nativeWithTAA = 1;
@@ -105,24 +133,25 @@ void ps_main(
     float samplingRate = ((b_FrameIndex.currentAAMode == nativeResolution || b_FrameIndex.currentAAMode == nativeWithTAA) ? 1.0f : g_SamplingRate.samplingRate);
 
     const int blockSize = 5;
-    const int patchSize = 3;
+    const int patchSize = 5;
     const float normalizationFactorPatch = 1.0f / (patchSize * patchSize);
     const float normalizationFactorBlock = 1.0f / (blockSize * blockSize);
     float3 curr[blockSize][blockSize];
     float3 hist[blockSize][blockSize];
     float3 varSqrd[blockSize][blockSize];
     float maximalConfidence[blockSize][blockSize];
+    float summedConfidence[blockSize][blockSize];
     [unroll]
     for (int di = -(blockSize / 2); di <= (blockSize / 2); ++di)
     {
         for (int dj = -(blockSize / 2); dj <= (blockSize / 2); ++dj)
         {
             float3 upsampledJitter = float3(0.0f, 0.0f, 0.0f);
-            float2 shiftedIPosition = i_position.xy + float2(di, dj);
+            float2 shiftedIPosition = iPosition.xy + float2(di, dj);
             float2 jitterSpaceSVPosition = samplingRate * shiftedIPosition;
             int2 floorSampleIndex = int2(floor(jitterSpaceSVPosition));
 
-            float3 motion_1stmoment = float3(0.0f, 0.0f, 0.0f);
+            float3 motionFirstMoment = float3(0.0f, 0.0f, 0.0f);
             float maximumWeight = 0.0f;
             float normalizationFactor = 0.0f;
 
@@ -137,7 +166,8 @@ void ps_main(
                     float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
                     float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
 
-                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 2.0f);
+                    //float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 2.0f);
+                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
 
                     localPatch1stMoment += probedJitteredSample;
                     localPatch2ndMoment += probedJitteredSample * probedJitteredSample;
@@ -146,18 +176,18 @@ void ps_main(
                     normalizationFactor += probedSampleWeight;
                     maximumWeight = max(maximumWeight, probedSampleWeight);
 
-                    float3 proximity_motion = t_MotionVector.Sample(s_LinearSampler, (shiftedIPosition + float2(dx, dy)) * g_View.viewportSizeInv).xyz;
+                    float3 proximityMotion = t_MotionVector.Sample(s_LinearSampler, (shiftedIPosition + float2(dx, dy)) * g_View.viewportSizeInv).xyz;
 
                     float probedSampleLuminance = getLuminance(probedJitteredSample);
-                    motion_1stmoment += proximity_motion;
+                    motionFirstMoment += proximityMotion;
                 }
             }
             if (maximumWeight != 0.0f)
             {
-                normalizationFactor = 1.0f / normalizationFactor;
-                upsampledJitter *= normalizationFactor;
+                upsampledJitter /= normalizationFactor;
             }
-            float3 curr_sample = float3(0.0f, 0.0f, 0.0f);
+            
+            float3 currSample = float3(0.0f, 0.0f, 0.0f);
 
             int shiftedIndexI = di + blockSize / 2;
             int shiftedIndexJ = dj + blockSize / 2;
@@ -167,22 +197,23 @@ void ps_main(
 
             if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
             {
-                curr_sample = t_JitteredCurrentBuffer[int2(floor(shiftedIPosition * samplingRate))].xyz;
+                currSample = t_JitteredCurrentBuffer[int2(floor(shiftedIPosition * samplingRate))].xyz;
                 maximalConfidence[shiftedIndexI][shiftedIndexJ] = 1.0f;
             }
             else
             {
-                curr_sample = upsampledJitter.xyz;
+                currSample = upsampledJitter.xyz;
                 maximalConfidence[shiftedIndexI][shiftedIndexJ] = maximumWeight;
+                summedConfidence[shiftedIndexI][shiftedIndexJ] = normalizationFactor;;
             }
             
-            curr[shiftedIndexI][shiftedIndexJ] = curr_sample;
+            curr[shiftedIndexI][shiftedIndexJ] = currSample;
 
-            motion_1stmoment *= normalizationFactorPatch;
-            float2 prev_location = shiftedIPosition * g_View.viewportSizeInv - motion_1stmoment.xy;
-            //float3 prev_normal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prev_location));
-            float3 prev_sample = t_HistoryColor.Sample(s_AnisotropicSampler, prev_location).xyz;
-            hist[shiftedIndexI][shiftedIndexJ] = prev_sample;
+            motionFirstMoment *= normalizationFactorPatch;
+            float2 prevLocation = shiftedIPosition * g_View.viewportSizeInv - motionFirstMoment.xy;
+            //float3 prevNormal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prevLocation));
+            float3 prevSample = t_HistoryColor.Sample(s_AnisotropicSampler, prevLocation).xyz;
+            hist[shiftedIndexI][shiftedIndexJ] = prevSample;
         }
     }
 
@@ -254,10 +285,10 @@ void ps_main(
 
     //float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);//based on dot product
     //float confidenceFactor = 1.0f - l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
-    float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
+    //float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
     //float confidenceFactor = 1.0f - infDifference / maximalInfDifference;//based on linf correspondence
     //float confidenceFactor = 1.0f - maNormSqrdDiff / (maximalmaNormSqrd + epsilon);//based on ma correspondence
-    //float confidenceFactor = 1.0f;//lmao
+    float confidenceFactor = 1.0f;//lmao
 
     float currentContribution = 0.1f;
     switch (b_FrameIndex.currentAAMode)
@@ -279,23 +310,24 @@ void ps_main(
         break;
     }
 
-    float3 center_hist = hist[blockSize / 2][blockSize / 2];
-    float3 center_curr = curr[blockSize / 2][blockSize / 2];
+    float3 centerHist = hist[blockSize / 2][blockSize / 2];
+    float3 centerCurr = curr[blockSize / 2][blockSize / 2];
 
     float historyContribution = (1.0f - currentContribution) * confidenceFactor;
     currentContribution = 1.0f - historyContribution;
     float3 blended = float3(0.0f, 0.0f, 0.0f);
     if (b_FrameIndex.frameHasReset == 0)
     {
-        blended = center_hist * historyContribution + center_curr * currentContribution;
-    }
-    else
-    {
-        blended = center_curr;
+        if (maximalConfidence[blockSize / 2][blockSize / 2] == 0.0f)
+        {
+            currentContribution = 0.0f;
+            historyContribution = 1.0f;
+        }
+        blended = currentContribution * centerCurr + historyContribution * centerHist;
     }
 
     //blended = varSqrd[blockSize / 2][blockSize / 2];
     //blended = center_curr;
-    current_buffer = float4(blended, 1.0f);
-    color_buffer = float4(blended, 1.0f);
+    currentBuffer = float4(blended, 1.0f);
+    colorBuffer = float4(blended, 1.0f);
 }
