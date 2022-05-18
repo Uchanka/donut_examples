@@ -139,6 +139,7 @@ void ps_main(
     float3 curr[blockSize][blockSize];
     float3 hist[blockSize][blockSize];
     float3 varSqrd[blockSize][blockSize];
+    float2 prevLocation[blockSize][blockSize];
     float maximalConfidence[blockSize][blockSize];
     float summedConfidence[blockSize][blockSize];
     [unroll]
@@ -210,9 +211,9 @@ void ps_main(
             curr[shiftedIndexI][shiftedIndexJ] = currSample;
 
             motionFirstMoment *= normalizationFactorPatch;
-            float2 prevLocation = shiftedIPosition * g_View.viewportSizeInv - motionFirstMoment.xy;
+            prevLocation[shiftedIndexI][shiftedIndexJ] = shiftedIPosition * g_View.viewportSizeInv - motionFirstMoment.xy;
             //float3 prevNormal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prevLocation));
-            float3 prevSample = t_HistoryColor.Sample(s_AnisotropicSampler, prevLocation).xyz;
+            float3 prevSample = t_HistoryColor.Sample(s_AnisotropicSampler, prevLocation[shiftedIndexI][shiftedIndexJ]).xyz;
             hist[shiftedIndexI][shiftedIndexJ] = prevSample;
         }
     }
@@ -325,15 +326,19 @@ void ps_main(
         }
         blended = currentContribution * centerCurr + historyContribution * centerHist;
     }
+    
+    float3 firstOrderHist = t_1stOrderMoment[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])].xyz;
+    float3 secondOrderHist = t_2ndOrderMoment[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])].xyz;
+
+    float3 zNominatorSqr = currentContribution * (centerCurr - firstOrderHist);
+    zNominatorSqr *= zNominatorSqr;
+    float3 zDenominatorSqr = (2.0f - currentContribution) * secondOrderHist + currentContribution * centerCurr * centerCurr - firstOrderHist * firstOrderHist;
+    float3 zDistanceChannel = zNominatorSqr / zDenominatorSqr;
+
+    float3 firstOrder = (1.0f - currentContribution) * firstOrderHist + currentContribution * blended;
+    float3 secondOrder = (1.0f - currentContribution) * secondOrderHist + currentContribution * blended * blended;
 
     int2 momentTexelIndex = int2(floor(i_Position.xy));
-    
-    float3 firstOrder = t_1stOrderMoment[momentTexelIndex].xyz;
-    float3 secondOrder = t_2ndOrderMoment[momentTexelIndex].xyz;
-
-    firstOrder = (1.0f - currentContribution) * firstOrder + currentContribution * blended;
-    secondOrder = (1.0f - currentContribution) * secondOrder + currentContribution * blended * blended;
-
     t_1stOrderMoment[momentTexelIndex] = float4(firstOrder, 0.0f);
     t_2ndOrderMoment[momentTexelIndex] = float4(secondOrder, 0.0f);
 
@@ -341,5 +346,5 @@ void ps_main(
     float3 variance = secondOrder - expectancy * expectancy;
 
     o_CurrentBuffer = float4(blended, 1.0f);
-    o_ColorBuffer = float4(blended, 1.0f);
+    o_ColorBuffer = float4(zDistanceChannel, 1.0f);
 }
