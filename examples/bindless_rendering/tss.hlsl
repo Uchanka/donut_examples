@@ -329,14 +329,17 @@ void ps_main(
     
     float3 firstOrderHist = t_1stOrderMoment[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])].xyz;
     float3 secondOrderHist = t_2ndOrderMoment[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])].xyz;
+    float3 varianceHist = secondOrderHist - firstOrderHist * firstOrderHist;
 
     float3 zNominatorSqr = currentContribution * (centerCurr - firstOrderHist);
     zNominatorSqr *= zNominatorSqr;
-    float3 zDenominatorSqr = (2.0f - currentContribution) * secondOrderHist + currentContribution * centerCurr * centerCurr - firstOrderHist * firstOrderHist;
-    float3 zDistanceChannel = zNominatorSqr / zDenominatorSqr;
 
     float3 firstOrder = (1.0f - currentContribution) * firstOrderHist + currentContribution * blended;
     float3 secondOrder = (1.0f - currentContribution) * secondOrderHist + currentContribution * blended * blended;
+    float3 varianceCurr = (1.0f - currentContribution) * secondOrderHist - 2.0f * (1.0f - currentContribution) * firstOrder * firstOrderHist;
+    varianceCurr += (1.0f - currentContribution) * firstOrder * firstOrder;
+    varianceCurr += currentContribution * (centerCurr - firstOrder) * (centerCurr - firstOrder);
+    float3 zDistance = zNominatorSqr / (varianceCurr + varianceHist);
 
     int2 momentTexelIndex = int2(floor(i_Position.xy));
     t_1stOrderMoment[momentTexelIndex] = float4(firstOrder, 0.0f);
@@ -346,5 +349,5 @@ void ps_main(
     float3 variance = secondOrder - expectancy * expectancy;
 
     o_CurrentBuffer = float4(blended, 1.0f);
-    o_ColorBuffer = float4(zDistanceChannel, 1.0f);
+    o_ColorBuffer = float4(blended, 1.0f);
 }
