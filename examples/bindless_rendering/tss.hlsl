@@ -42,7 +42,7 @@ Texture2D<float4> t_JitteredCurrentBuffer : register(t2);
 Texture2D<float3> t_NormalBuffer : register(t3);
 Texture2D<float3> t_HistoryNormal : register(t4);
 
-RWTexture2D<float> t_ValidSamples : register(u0);
+RWTexture2D<float> t_SequenceSqrdSum : register(u0);
 RWTexture2D<float4> t_1stOrderMoment : register(u1);
 RWTexture2D<float4> t_2ndOrderMoment : register(u2);
 
@@ -98,19 +98,19 @@ float cubicBSpline(float2 center, float2 position, float h)
     float Nx = 0.0f;
     float Ny = 0.0f;
 
-    if (x.x < 1.0f)
+    if (absx.x < 1.0f)
     {
         Nx = 0.5 * absxcubic.x - xsqr.x + 2.0f / 3.0f;
     }
-    else if (x.x < 2.0f)
+    else if (absx.x < 2.0f)
     {
         Nx = -1.0f / 6.0f * absxcubic.x + xsqr.x - 2.0f * absx.x + 4.0f / 3.0f;
     }
-    if (x.y < 1.0f)
+    if (absx.y < 1.0f)
     {
         Ny = 0.5 * absxcubic.y - xsqr.y + 2.0f / 3.0f;
     }
-    else if (x.y < 2.0f)
+    else if (absx.y < 2.0f)
     {
         Ny = -1.0f / 6.0f * absxcubic.y + xsqr.y - 2.0f * absx.y + 4.0f / 3.0f;
     }
@@ -138,7 +138,8 @@ void ps_main(
     const float normalizationFactorBlock = 1.0f / (blockSize * blockSize);
     float3 curr[blockSize][blockSize];
     float3 hist[blockSize][blockSize];
-    float3 varSqrd[blockSize][blockSize];
+    float3 varSqrdHist[blockSize][blockSize];
+    float3 varSqrdLocal[blockSize][blockSize];
     float2 prevLocation[blockSize][blockSize];
     float maximalConfidence[blockSize][blockSize];
     float summedConfidence[blockSize][blockSize];
@@ -167,8 +168,8 @@ void ps_main(
                     float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
                     float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
 
-                    //float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 2.0f);
-                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
+                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 1.5f);
+                    //float probedSampleWeight = cubicBSpline(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
 
                     localPatch1stMoment += probedJitteredSample;
                     localPatch2ndMoment += probedJitteredSample * probedJitteredSample;
@@ -187,6 +188,10 @@ void ps_main(
             {
                 upsampledJitter /= normalizationFactor;
             }
+            else
+            {
+                upsampledJitter = t_HistoryColor.Sample(s_LinearSampler, shiftedIPosition * g_View.viewportSizeInv).xyz;
+            }
             
             float3 currSample = float3(0.0f, 0.0f, 0.0f);
 
@@ -194,7 +199,7 @@ void ps_main(
             int shiftedIndexJ = dj + blockSize / 2;
 
             float3 estimatedExpectancy = normalizationFactorPatch * localPatch1stMoment;
-            varSqrd[shiftedIndexI][shiftedIndexJ] = normalizationFactorPatch * localPatch2ndMoment - estimatedExpectancy * estimatedExpectancy;
+            varSqrdLocal[shiftedIndexI][shiftedIndexJ] = normalizationFactorPatch * localPatch2ndMoment - estimatedExpectancy * estimatedExpectancy;
 
             if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
             {
@@ -215,6 +220,8 @@ void ps_main(
             //float3 prevNormal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prevLocation));
             float3 prevSample = t_HistoryColor.Sample(s_AnisotropicSampler, prevLocation[shiftedIndexI][shiftedIndexJ]).xyz;
             hist[shiftedIndexI][shiftedIndexJ] = prevSample;
+            float3 prevExpectancy = t_1stOrderMoment[int2(g_View.viewportSize * prevLocation[shiftedIndexI][shiftedIndexJ])].xyz;
+            varSqrdHist[shiftedIndexI][shiftedIndexJ] = t_2ndOrderMoment[int2(g_View.viewportSize * prevLocation[shiftedIndexI][shiftedIndexJ])].xyz - prevExpectancy * prevExpectancy;
         }
     }
 
@@ -222,7 +229,9 @@ void ps_main(
     float l2NormSqrdCurr = 0.0f;
     float l2NormSqrdHist = 0.0f;
     float maNormSqrdDiff = 0.0f;
+    float tempMaNormSqrdDiff = 0.0f;
     float maximalmaNormSqrd = 0.0f;
+    float tempMaximalMaSqrd = 0.0f;
     float l1Difference = 0.0f;
     float maximalL1Diff = 0.0f;
     float l2DifferenceSqrd = 0.0f;
@@ -268,17 +277,27 @@ void ps_main(
             maximalL1Diff += dot(max(currVector, histVector), allOneVector);
             l2DifferenceSqrd += dot(diffVector, diffVector);
             
-            float3 allInvSigmaVector = varSqrd[shiftedIndexK][shiftedIndexL];
-            for (int comp = 0; comp < sizeof(allInvSigmaVector) / sizeof(allInvSigmaVector[0]); ++comp)
+            float3 allInvSigmaSpatial = varSqrdLocal[shiftedIndexK][shiftedIndexL];
+            float3 allInvSigmaTemporal = varSqrdHist[shiftedIndexK][shiftedIndexL];
+            for (int comp = 0; comp < sizeof(allInvSigmaSpatial) / sizeof(allInvSigmaSpatial[0]); ++comp)
             {
-                float sigmaComponent = 1.0f / allInvSigmaVector[comp];
-                allInvSigmaVector[comp] = (sigmaComponent == 0.0f) ? 1.0f : 1.0f / sigmaComponent;
+                float sigmaComponent = allInvSigmaSpatial[comp];
+                allInvSigmaSpatial[comp] = (sigmaComponent == 0.0f) ? 1.0f : 1.0f / sigmaComponent;
                 float absDiffComponent = diffVector[comp];
                 infDifference = absDiffComponent > infDifference ? absDiffComponent : infDifference;
             }
-            maNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaVector);
-            maximalmaNormSqrd += dot(currVector * currVector, allInvSigmaVector);
-            maximalmaNormSqrd += dot(histVector * histVector, allInvSigmaVector);
+            for (int compT = 0; compT < sizeof(allInvSigmaTemporal) / sizeof(allInvSigmaTemporal[0]); ++compT)
+            {
+                float sigmaComponent = allInvSigmaTemporal[compT];
+                allInvSigmaTemporal[compT] = (sigmaComponent == 0.0f) ? 1.0f : 1.0f / sigmaComponent;
+            }
+            maNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaSpatial);
+            maximalmaNormSqrd += dot(currVector * currVector, allInvSigmaSpatial);
+            maximalmaNormSqrd += dot(histVector * histVector, allInvSigmaSpatial);
+
+            tempMaNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaTemporal);
+            tempMaximalMaSqrd += dot(currVector * currVector, allInvSigmaTemporal);
+            tempMaximalMaSqrd += dot(histVector * histVector, allInvSigmaTemporal);
         }
     }
     float maximalL2DiffSqrd = l2NormSqrdCurr + l2NormSqrdHist;
@@ -286,12 +305,13 @@ void ps_main(
 
     //float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);//based on dot product
     //float confidenceFactor = 1.0f - l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
-    //float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
+    float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
     //float confidenceFactor = 1.0f - infDifference / maximalInfDifference;//based on linf correspondence
     //float confidenceFactor = 1.0f - maNormSqrdDiff / (maximalmaNormSqrd + epsilon);//based on ma correspondence
-    float confidenceFactor = 1.0f;//lmao
+    //float confidenceFactor = 1.0f - tempMaNormSqrdDiff / (tempMaNormSqrdDiff + epsilon);//based on temporal ma variance
+    //float confidenceFactor = 1.0f;//lmao
 
-    float currentContribution = 0.1f;
+    float currentContribution = 0.3f;
     switch (b_FrameIndex.currentAAMode)
     {
     case nativeResolution:
@@ -329,24 +349,28 @@ void ps_main(
     
     float3 firstOrderHist = t_1stOrderMoment[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])].xyz;
     float3 secondOrderHist = t_2ndOrderMoment[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])].xyz;
+    float sequenceSqrdSumHist = t_SequenceSqrdSum[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])];
     float3 varianceHist = secondOrderHist - firstOrderHist * firstOrderHist;
 
     float3 zNominatorSqr = currentContribution * (centerCurr - firstOrderHist);
     zNominatorSqr *= zNominatorSqr;
 
-    float3 firstOrder = (1.0f - currentContribution) * firstOrderHist + currentContribution * blended;
-    float3 secondOrder = (1.0f - currentContribution) * secondOrderHist + currentContribution * blended * blended;
-    float3 varianceCurr = (1.0f - currentContribution) * secondOrderHist - 2.0f * (1.0f - currentContribution) * firstOrder * firstOrderHist;
-    varianceCurr += (1.0f - currentContribution) * firstOrder * firstOrder;
-    varianceCurr += currentContribution * (centerCurr - firstOrder) * (centerCurr - firstOrder);
-    float3 zDistance = zNominatorSqr / (varianceCurr + varianceHist);
-
+    float3 firstOrderUpdated = (1.0f - currentContribution) * firstOrderHist + currentContribution * blended;
+    float3 secondOrderUpdated = (1.0f - currentContribution) * secondOrderHist + currentContribution * blended * blended;
+    
     int2 momentTexelIndex = int2(floor(i_Position.xy));
-    t_1stOrderMoment[momentTexelIndex] = float4(firstOrder, 0.0f);
-    t_2ndOrderMoment[momentTexelIndex] = float4(secondOrder, 0.0f);
+    float sequenceSqrdSum = sequenceSqrdSumHist * (1.0f - currentContribution) * (1.0f - currentContribution) + currentContribution * currentContribution;
+    t_SequenceSqrdSum[momentTexelIndex] = sequenceSqrdSum;
+    t_1stOrderMoment[momentTexelIndex] = float4(firstOrderUpdated, 0.0f);
+    t_2ndOrderMoment[momentTexelIndex] = float4(secondOrderUpdated, 0.0f);
 
-    float3 expectancy = firstOrder;
-    float3 variance = secondOrder - expectancy * expectancy;
+    float3 expectancy = firstOrderUpdated;
+    float3 variance = secondOrderUpdated - expectancy * expectancy;
+    float3 fixedLocationDelta = curr[blockSize / 2][blockSize / 2] - expectancy;
+    float3 currHistDelta = curr[blockSize / 2][blockSize / 2] - hist[blockSize / 2][blockSize / 2];
+    float3 effectiveSamples = 1.0f / sequenceSqrdSum;
+
+    float3 sigmaTolerance = 3.0f;
 
     o_CurrentBuffer = float4(blended, 1.0f);
     o_ColorBuffer = float4(blended, 1.0f);
