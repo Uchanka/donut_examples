@@ -168,8 +168,8 @@ void ps_main(
                     float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
                     float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
 
-                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 1.5f);
-                    //float probedSampleWeight = cubicBSpline(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
+                    //float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 1.5f);
+                    float probedSampleWeight = cubicBSpline(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
 
                     localPatch1stMoment += probedJitteredSample;
                     localPatch2ndMoment += probedJitteredSample * probedJitteredSample;
@@ -305,13 +305,13 @@ void ps_main(
 
     //float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);//based on dot product
     //float confidenceFactor = 1.0f - l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
-    float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
+    //float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
     //float confidenceFactor = 1.0f - infDifference / maximalInfDifference;//based on linf correspondence
-    //float confidenceFactor = 1.0f - maNormSqrdDiff / (maximalmaNormSqrd + epsilon);//based on ma correspondence
+    float confidenceFactor = 1.0f - maNormSqrdDiff / (maximalmaNormSqrd + epsilon);//based on ma correspondence
     //float confidenceFactor = 1.0f - tempMaNormSqrdDiff / (tempMaNormSqrdDiff + epsilon);//based on temporal ma variance
     //float confidenceFactor = 1.0f;//lmao
 
-    float currentContribution = 0.3f;
+    float currentContribution = 0.1f;
     switch (b_FrameIndex.currentAAMode)
     {
     case nativeResolution:
@@ -352,11 +352,8 @@ void ps_main(
     float sequenceSqrdSumHist = t_SequenceSqrdSum[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])];
     float3 varianceHist = secondOrderHist - firstOrderHist * firstOrderHist;
 
-    float3 zNominatorSqr = currentContribution * (centerCurr - firstOrderHist);
-    zNominatorSqr *= zNominatorSqr;
-
-    float3 firstOrderUpdated = (1.0f - currentContribution) * firstOrderHist + currentContribution * blended;
-    float3 secondOrderUpdated = (1.0f - currentContribution) * secondOrderHist + currentContribution * blended * blended;
+    float3 firstOrderUpdated = (1.0f - currentContribution) * firstOrderHist + currentContribution * centerCurr;
+    float3 secondOrderUpdated = (1.0f - currentContribution) * secondOrderHist + currentContribution * centerCurr * centerCurr;
     
     int2 momentTexelIndex = int2(floor(i_Position.xy));
     float sequenceSqrdSum = sequenceSqrdSumHist * (1.0f - currentContribution) * (1.0f - currentContribution) + currentContribution * currentContribution;
@@ -373,5 +370,6 @@ void ps_main(
     float3 sigmaTolerance = 3.0f;
 
     o_CurrentBuffer = float4(blended, 1.0f);
+    //o_ColorBuffer = float4(confidenceFactor, confidenceFactor, confidenceFactor, 1.0f
     o_ColorBuffer = float4(blended, 1.0f);
 }
