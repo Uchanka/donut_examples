@@ -155,9 +155,10 @@ void ps_main(
     const float normalizationFactorBlock = 1.0f / (blockSize * blockSize);
     float3 curr[blockSize][blockSize];
     float3 hist[blockSize][blockSize];
+    float3 deri[blockSize][blockSize];
     float3 varSqrdSpac[blockSize][blockSize];
     float3 varSqrdTemp[blockSize][blockSize];
-    float2 perPixelVelocity[blockSize][blockSize];
+    float3 perPixelVelocity[blockSize][blockSize];
     float2 prevLocation[blockSize][blockSize];
     float maximalConfidence[blockSize][blockSize];
 
@@ -226,10 +227,12 @@ void ps_main(
             
             curr[shiftedIndexI][shiftedIndexJ] = currSample;
 
+            //motionFirstMoment = t_MotionVector.Sample(s_LinearSampler, (shiftedIPosition)*g_View.viewportSizeInv).xyz;
             motionFirstMoment *= normalizationFactorPatch;
-            perPixelVelocity[shiftedIndexI][shiftedIndexJ] = motionFirstMoment.xy;
+            perPixelVelocity[shiftedIndexI][shiftedIndexJ] = motionFirstMoment;
             prevLocation[shiftedIndexI][shiftedIndexJ] = shiftedIPosition * g_View.viewportSizeInv - motionFirstMoment.xy;
             float3 prevSample = t_HistoryColor.Sample(s_AnisotropicSampler, prevLocation[shiftedIndexI][shiftedIndexJ]).xyz;
+            deri[shiftedIndexI][shiftedIndexJ] = t_HistoryColor.Sample(s_AnisotropicSampler, shiftedIPosition * g_View.viewportSizeInv).xyz;
             if (!isWithInNDC(prevLocation[shiftedIndexI][shiftedIndexJ]))
             {
                 prevSample = float3(0.0f, 0.0f, 0.0f);
@@ -259,6 +262,8 @@ void ps_main(
     
     const float epsilon = 0.00001f;
 
+    float3 minimalCurr = float3(1.0f, 1.0f, 1.0f);
+    float3 maximalCurr = float3(0.0f, 0.0f, 0.0f);
     [unroll]
     for (int dk = -(blockSize / 2); dk <= (blockSize / 2); ++dk)
     {
@@ -274,9 +279,11 @@ void ps_main(
             
             float3 currVector = curr[shiftedIndexK][shiftedIndexL];
             float3 histVector = hist[shiftedIndexK][shiftedIndexL];
-            float3 diffVector = abs(currVector - histVector);
-            float3 allOneVector = float3(1.0f, 1.0f, 1.0f);
-
+            float3 deriVector = deri[shiftedIndexK][shiftedIndexL];
+            float3 diffVector = abs(currVector - histVector) * maximalConfidence[shiftedIndexK][shiftedIndexL] + abs(deriVector - histVector);
+            //minimalCurr = min(minimalCurr, currVector - 2.0 * varSqrdTemp[shiftedIndexK][shiftedIndexL]);
+            //maximalCurr = max(maximalCurr, currVector + 2.0 * varSqrdTemp[shiftedIndexK][shiftedIndexL]);
+            //float3 allOneVector = float3(1.0f, 1.0f, 1.0f);
             float3 allInvSigmaTemporal = varSqrdTemp[shiftedIndexK][shiftedIndexL];
             for (int compT = 0; compT < sizeof(allInvSigmaTemporal) / sizeof(allInvSigmaTemporal[0]); ++compT)
             {
@@ -290,14 +297,22 @@ void ps_main(
         }
     }
 
-    float confidenceFactor = 1.0f - tempMaNormSqrdDiff / (tempMaximalMaSqrd + epsilon);//based on ma correspondence
+    float confidenceFactor = 1.0f - sqrt(tempMaNormSqrdDiff) / (sqrt(tempMaximalMaSqrd) + epsilon);//based on ma correspondence
+    //confidenceFactor *= 1.0f - length(perPixelVelocity[blockSize / 2][blockSize / 2]);
+    //confidenceFactor = log(confidenceFactor);
+    //confidenceFactor *= confidenceFactor * confidenceFactor;
+    //confidenceFactor *= confidenceFactor * confidenceFactor;
     float2 prevLocationCriterion = prevLocation[blockSize / 2][blockSize / 2];
     if (!isWithInNDC(prevLocation[blockSize / 2][blockSize / 2]))
     {
         confidenceFactor = 0.0f;
     }
     //confidenceFactor = 1.0f;
-    float currentContribution = 0.1f;
+
+    int2 momentTexelIndex = int2(floor(i_Position.xy));
+    float effectiveSamples = 1.0f / t_SequenceSqrdSum[momentTexelIndex];
+    //float currentContribution = 0.1f;
+    float currentContribution = 1.0f / (effectiveSamples + 1.0f);
     switch (b_FrameIndex.currentAAMode)
     {
     case nativeResolution:
@@ -307,18 +322,19 @@ void ps_main(
         currentContribution = 1.0f;
         break;
     case temporalSupersamplingAA:
-        currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
+        //currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
         break;
     case temporalAntiAliasingAA:
-        currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
+        //currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
         break;
     case nativeWithTAA:
-        currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
+        //currentContribution *= maximalConfidence[blockSize / 2][blockSize / 2];
         break;
     }
 
     float3 centerHist = hist[blockSize / 2][blockSize / 2];
     float3 centerCurr = curr[blockSize / 2][blockSize / 2];
+    //centerHist = max(min(centerHist, maximalCurr), minimalCurr);
 
     float historyContribution = (1.0f - currentContribution) * confidenceFactor;
     currentContribution = 1.0f - historyContribution;
@@ -341,7 +357,6 @@ void ps_main(
     float3 firstOrderUpdated = (1.0f - currentContribution) * firstOrderHist + currentContribution * centerCurr;
     float3 secondOrderUpdated = (1.0f - currentContribution) * secondOrderHist + currentContribution * centerCurr * centerCurr;
     
-    int2 momentTexelIndex = int2(floor(i_Position.xy));
     float sequenceSqrdSum = sequenceSqrdSumHist * (1.0f - currentContribution) * (1.0f - currentContribution) + currentContribution * currentContribution;
     t_SequenceSqrdSum[momentTexelIndex] = sequenceSqrdSum;
     t_1stOrderMoment[momentTexelIndex] = float4(firstOrderUpdated, 0.0f);
@@ -351,8 +366,7 @@ void ps_main(
     float3 variance = secondOrderUpdated - expectancy * expectancy;
     float3 fixedLocationDelta = curr[blockSize / 2][blockSize / 2] - expectancy;
     float3 currHistDelta = curr[blockSize / 2][blockSize / 2] - hist[blockSize / 2][blockSize / 2];
-    float3 effectiveSamples = 1.0f / sequenceSqrdSum;
-
+    
     o_CurrentBuffer = float4(blended, 1.0f);
     o_ColorBuffer = float4(blended, 1.0f);
 }
