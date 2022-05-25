@@ -138,11 +138,12 @@ void ps_main(
     const float normalizationFactorBlock = 1.0f / (blockSize * blockSize);
     float3 curr[blockSize][blockSize];
     float3 hist[blockSize][blockSize];
-    float3 varSqrdHist[blockSize][blockSize];
-    float3 varSqrdLocal[blockSize][blockSize];
+    float3 varSqrdSpac[blockSize][blockSize];
+    float3 varSqrdTemp[blockSize][blockSize];
+    float2 perPixelVelocity[blockSize][blockSize];
     float2 prevLocation[blockSize][blockSize];
     float maximalConfidence[blockSize][blockSize];
-    float summedConfidence[blockSize][blockSize];
+
     [unroll]
     for (int di = -(blockSize / 2); di <= (blockSize / 2); ++di)
     {
@@ -157,8 +158,8 @@ void ps_main(
             float maximumWeight = 0.0f;
             float normalizationFactor = 0.0f;
 
-            float3 localPatch1stMoment = float3(0.0f, 0.0f, 0.0f);
-            float3 localPatch2ndMoment = float3(0.0f, 0.0f, 0.0f);
+            float3 spatialSecondMoment = 0.0f;
+            float3 spatialFirstMoment = 0.0f;
 
             for (int dy = -(patchSize / 2); dy <= (patchSize / 2); ++dy)
             {
@@ -168,11 +169,8 @@ void ps_main(
                     float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
                     float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
 
-                    //float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * 1.5f);
+                    //float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
                     float probedSampleWeight = cubicBSpline(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
-
-                    localPatch1stMoment += probedJitteredSample;
-                    localPatch2ndMoment += probedJitteredSample * probedJitteredSample;
 
                     upsampledJitter += probedSampleWeight * probedJitteredSample.xyz;
                     normalizationFactor += probedSampleWeight;
@@ -198,9 +196,6 @@ void ps_main(
             int shiftedIndexI = di + blockSize / 2;
             int shiftedIndexJ = dj + blockSize / 2;
 
-            float3 estimatedExpectancy = normalizationFactorPatch * localPatch1stMoment;
-            varSqrdLocal[shiftedIndexI][shiftedIndexJ] = normalizationFactorPatch * localPatch2ndMoment - estimatedExpectancy * estimatedExpectancy;
-
             if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
             {
                 currSample = t_JitteredCurrentBuffer[int2(floor(shiftedIPosition * samplingRate))].xyz;
@@ -210,32 +205,35 @@ void ps_main(
             {
                 currSample = upsampledJitter.xyz;
                 maximalConfidence[shiftedIndexI][shiftedIndexJ] = maximumWeight;
-                summedConfidence[shiftedIndexI][shiftedIndexJ] = normalizationFactor;;
             }
             
             curr[shiftedIndexI][shiftedIndexJ] = currSample;
 
+            perPixelVelocity[shiftedIndexI][shiftedIndexJ] = motionFirstMoment.xy;
             motionFirstMoment *= normalizationFactorPatch;
             prevLocation[shiftedIndexI][shiftedIndexJ] = shiftedIPosition * g_View.viewportSizeInv - motionFirstMoment.xy;
-            //float3 prevNormal = normalize(t_NormalBuffer.Sample(s_LinearSampler, prevLocation));
             float3 prevSample = t_HistoryColor.Sample(s_AnisotropicSampler, prevLocation[shiftedIndexI][shiftedIndexJ]).xyz;
             hist[shiftedIndexI][shiftedIndexJ] = prevSample;
             float3 prevExpectancy = t_1stOrderMoment[int2(g_View.viewportSize * prevLocation[shiftedIndexI][shiftedIndexJ])].xyz;
-            varSqrdHist[shiftedIndexI][shiftedIndexJ] = t_2ndOrderMoment[int2(g_View.viewportSize * prevLocation[shiftedIndexI][shiftedIndexJ])].xyz - prevExpectancy * prevExpectancy;
+            varSqrdTemp[shiftedIndexI][shiftedIndexJ] = t_2ndOrderMoment[int2(g_View.viewportSize * prevLocation[shiftedIndexI][shiftedIndexJ])].xyz - prevExpectancy * prevExpectancy;
+
+            for (int dyt = -(patchSize / 2); dyt <= (patchSize / 2); ++dyt)
+            {
+                for (int dxt = -(patchSize / 2); dxt <= (patchSize / 2); ++dxt)
+                {
+                    float3 probedHistSample = t_HistoryColor.Sample(s_AnisotropicSampler, prevLocation[shiftedIndexI][shiftedIndexJ] + g_View.viewportSizeInv * float2(dxt, dyt)).xyz;
+
+                    spatialSecondMoment += probedHistSample * probedHistSample;
+                    spatialFirstMoment += probedHistSample;
+                }
+            }
+            spatialFirstMoment *= normalizationFactorPatch;
+            varSqrdSpac[shiftedIndexI][shiftedIndexJ] = spatialSecondMoment * normalizationFactorPatch - spatialFirstMoment * spatialFirstMoment;
         }
     }
 
-    float dotProduct = 0.0f;
-    float l2NormSqrdCurr = 0.0f;
-    float l2NormSqrdHist = 0.0f;
-    float maNormSqrdDiff = 0.0f;
     float tempMaNormSqrdDiff = 0.0f;
-    float maximalmaNormSqrd = 0.0f;
     float tempMaximalMaSqrd = 0.0f;
-    float l1Difference = 0.0f;
-    float maximalL1Diff = 0.0f;
-    float l2DifferenceSqrd = 0.0f;
-    float infDifference = 0.0f;
     
     const float epsilon = 0.00001f;
 
@@ -249,68 +247,24 @@ void ps_main(
 
             float3 currVector = curr[shiftedIndexK][shiftedIndexL];
             float3 histVector = hist[shiftedIndexK][shiftedIndexL];
-
-            dotProduct += dot(currVector, histVector);
-            l2NormSqrdCurr += dot(currVector, currVector);
-            l2NormSqrdHist += dot(histVector, histVector);
-
-            //float3 diffVector = float3(0.0f, 0.0f, 0.0f);
             float3 diffVector = abs(currVector - histVector);
-            /*for (int dm = -1; dm <= 1; ++dm)
-            {
-                float factorY = (dm == 0) ? 0.5f : 0.25f;
-                int convIndexY = dm + dk;
-                convIndexY = convIndexY >= 0 ? convIndexY : -convIndexY;
-                convIndexY = convIndexY < blockSize ? convIndexY : 2 * blockSize - convIndexY;
-                for (int dn = -1; dn <= 1; ++dn)
-                {
-                    float factorX = (dn == 0) ? 0.5f : 0.25f;
-                    int convIndexX = dn + dl;
-                    convIndexX = convIndexX >= 0 ? convIndexX : -convIndexX;
-                    convIndexX = convIndexX < blockSize ? convIndexX : 2 * blockSize - convIndexX;
-                    diffVector += factorX * factorY * abs(hist[convIndexX][convIndexY] - curr[convIndexX][convIndexY]);
-                }
-            }*/
             float3 allOneVector = float3(1.0f, 1.0f, 1.0f);
 
-            l1Difference += dot(diffVector, allOneVector);
-            maximalL1Diff += dot(max(currVector, histVector), allOneVector);
-            l2DifferenceSqrd += dot(diffVector, diffVector);
-            
-            float3 allInvSigmaSpatial = varSqrdLocal[shiftedIndexK][shiftedIndexL];
-            float3 allInvSigmaTemporal = varSqrdHist[shiftedIndexK][shiftedIndexL];
-            for (int comp = 0; comp < sizeof(allInvSigmaSpatial) / sizeof(allInvSigmaSpatial[0]); ++comp)
-            {
-                float sigmaComponent = allInvSigmaSpatial[comp];
-                allInvSigmaSpatial[comp] = (sigmaComponent == 0.0f) ? 1.0f : 1.0f / sigmaComponent;
-                float absDiffComponent = diffVector[comp];
-                infDifference = absDiffComponent > infDifference ? absDiffComponent : infDifference;
-            }
+            float3 allInvSigmaTemporal = varSqrdTemp[shiftedIndexK][shiftedIndexL];
             for (int compT = 0; compT < sizeof(allInvSigmaTemporal) / sizeof(allInvSigmaTemporal[0]); ++compT)
             {
                 float sigmaComponent = allInvSigmaTemporal[compT];
-                allInvSigmaTemporal[compT] = (sigmaComponent == 0.0f) ? 1.0f : 1.0f / sigmaComponent;
+                allInvSigmaTemporal[compT] = 1.0f;//(sigmaComponent < epsilon) ? 1.0f : 1.0f / sigmaComponent;
             }
-            maNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaSpatial);
-            maximalmaNormSqrd += dot(currVector * currVector, allInvSigmaSpatial);
-            maximalmaNormSqrd += dot(histVector * histVector, allInvSigmaSpatial);
 
             tempMaNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaTemporal);
             tempMaximalMaSqrd += dot(currVector * currVector, allInvSigmaTemporal);
             tempMaximalMaSqrd += dot(histVector * histVector, allInvSigmaTemporal);
         }
     }
-    float maximalL2DiffSqrd = l2NormSqrdCurr + l2NormSqrdHist;
-    float maximalInfDifference = 1.0f;
 
-    //float confidenceFactor = (dotProduct * dotProduct) / (l2NormCurr * l2NormHist + epsilon);//based on dot product
-    //float confidenceFactor = 1.0f - l1Difference / (maximalL1Diff + epsilon);//based on l1 correspondence
-    //float confidenceFactor = 1.0f - l2DifferenceSqrd / (maximalL2DiffSqrd + epsilon);//based on l2 correspondence
-    //float confidenceFactor = 1.0f - infDifference / maximalInfDifference;//based on linf correspondence
-    float confidenceFactor = 1.0f - maNormSqrdDiff / (maximalmaNormSqrd + epsilon);//based on ma correspondence
-    //float confidenceFactor = 1.0f - tempMaNormSqrdDiff / (tempMaNormSqrdDiff + epsilon);//based on temporal ma variance
-    //float confidenceFactor = 1.0f;//lmao
-
+    float confidenceFactor = 1.0f - tempMaNormSqrdDiff / (tempMaximalMaSqrd + epsilon);//based on ma correspondence
+    //confidenceFactor = 1.0f;
     float currentContribution = 0.1f;
     switch (b_FrameIndex.currentAAMode)
     {
@@ -366,8 +320,6 @@ void ps_main(
     float3 fixedLocationDelta = curr[blockSize / 2][blockSize / 2] - expectancy;
     float3 currHistDelta = curr[blockSize / 2][blockSize / 2] - hist[blockSize / 2][blockSize / 2];
     float3 effectiveSamples = 1.0f / sequenceSqrdSum;
-
-    float3 sigmaTolerance = 3.0f;
 
     o_CurrentBuffer = float4(blended, 1.0f);
     o_ColorBuffer = float4(blended, 1.0f);
