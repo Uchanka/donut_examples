@@ -254,7 +254,7 @@ void ps_main(
             for (int compT = 0; compT < sizeof(allInvSigmaTemporal) / sizeof(allInvSigmaTemporal[0]); ++compT)
             {
                 float sigmaComponent = allInvSigmaTemporal[compT];
-                allInvSigmaTemporal[compT] = 1.0f;//(sigmaComponent < epsilon) ? 1.0f : 1.0f / sigmaComponent;
+                allInvSigmaTemporal[compT] = (sigmaComponent < epsilon) ? 1.0f : 1.0f / sigmaComponent;
             }
 
             tempMaNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaTemporal);
