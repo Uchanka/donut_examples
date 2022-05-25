@@ -89,7 +89,7 @@ float tentValue(float2 center, float2 position, float tentWidth)
     return contributionX * contributionY;
 }
 
-float cubicBSpline(float2 center, float2 position, float h)
+float cubicBSplineValue(float2 center, float2 position, float h)
 {
     float2 x = (position - center) / h;
     float2 absx = abs(x);
@@ -116,6 +116,23 @@ float cubicBSpline(float2 center, float2 position, float h)
     }
 
     return Nx * Ny;
+}
+
+float catmullRomValue()
+{
+    return 0.0f;
+}
+
+bool isWithInNDC(float2 ndcCoordinates)
+{
+    if (ndcCoordinates.x < 0.0f || ndcCoordinates.y < 0.0f || ndcCoordinates.x > 1.0f || ndcCoordinates.y > 1.0f)
+    {
+        return false;
+    }
+    else
+    {
+        return true;
+    }
 }
 
 void ps_main(
@@ -169,8 +186,8 @@ void ps_main(
                     float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
                     float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
 
-                    //float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
-                    float probedSampleWeight = cubicBSpline(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
+                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
+                    //float probedSampleWeight = cubicBSplineValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
 
                     upsampledJitter += probedSampleWeight * probedJitteredSample.xyz;
                     normalizationFactor += probedSampleWeight;
@@ -213,6 +230,11 @@ void ps_main(
             motionFirstMoment *= normalizationFactorPatch;
             prevLocation[shiftedIndexI][shiftedIndexJ] = shiftedIPosition * g_View.viewportSizeInv - motionFirstMoment.xy;
             float3 prevSample = t_HistoryColor.Sample(s_AnisotropicSampler, prevLocation[shiftedIndexI][shiftedIndexJ]).xyz;
+            if (!isWithInNDC(prevLocation[shiftedIndexI][shiftedIndexJ]))
+            {
+                prevSample = float3(0.0f, 0.0f, 0.0f);
+                maximalConfidence[shiftedIndexI][shiftedIndexJ] = 1.0f;
+            }
             hist[shiftedIndexI][shiftedIndexJ] = prevSample;
             float3 prevExpectancy = t_1stOrderMoment[int2(g_View.viewportSize * prevLocation[shiftedIndexI][shiftedIndexJ])].xyz;
             varSqrdTemp[shiftedIndexI][shiftedIndexJ] = t_2ndOrderMoment[int2(g_View.viewportSize * prevLocation[shiftedIndexI][shiftedIndexJ])].xyz - prevExpectancy * prevExpectancy;
@@ -245,6 +267,11 @@ void ps_main(
             int shiftedIndexK = dk + blockSize / 2;
             int shiftedIndexL = dl + blockSize / 2;
 
+            if (maximalConfidence[shiftedIndexK][shiftedIndexL] == 0.0f)
+            {
+                continue;
+            }
+            
             float3 currVector = curr[shiftedIndexK][shiftedIndexL];
             float3 histVector = hist[shiftedIndexK][shiftedIndexL];
             float3 diffVector = abs(currVector - histVector);
@@ -254,7 +281,7 @@ void ps_main(
             for (int compT = 0; compT < sizeof(allInvSigmaTemporal) / sizeof(allInvSigmaTemporal[0]); ++compT)
             {
                 float sigmaComponent = allInvSigmaTemporal[compT];
-                allInvSigmaTemporal[compT] = (sigmaComponent < epsilon) ? 1.0f : 1.0f / sigmaComponent;
+                allInvSigmaTemporal[compT] = (sigmaComponent < epsilon) ? 1.0f / epsilon : 1.0f / sigmaComponent;
             }
 
             tempMaNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaTemporal);
@@ -265,7 +292,7 @@ void ps_main(
 
     float confidenceFactor = 1.0f - tempMaNormSqrdDiff / (tempMaximalMaSqrd + epsilon);//based on ma correspondence
     float2 prevLocationCriterion = prevLocation[blockSize / 2][blockSize / 2];
-    if (prevLocationCriterion.x < 0.0f || prevLocationCriterion.y < 0.0f || prevLocationCriterion.x > 1.0f || prevLocationCriterion.y > 1.0f)
+    if (!isWithInNDC(prevLocation[blockSize / 2][blockSize / 2]))
     {
         confidenceFactor = 0.0f;
     }
