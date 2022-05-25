@@ -226,8 +226,8 @@ void ps_main(
             
             curr[shiftedIndexI][shiftedIndexJ] = currSample;
 
-            perPixelVelocity[shiftedIndexI][shiftedIndexJ] = motionFirstMoment.xy;
             motionFirstMoment *= normalizationFactorPatch;
+            perPixelVelocity[shiftedIndexI][shiftedIndexJ] = motionFirstMoment.xy;
             prevLocation[shiftedIndexI][shiftedIndexJ] = shiftedIPosition * g_View.viewportSizeInv - motionFirstMoment.xy;
             float3 prevSample = t_HistoryColor.Sample(s_AnisotropicSampler, prevLocation[shiftedIndexI][shiftedIndexJ]).xyz;
             if (!isWithInNDC(prevLocation[shiftedIndexI][shiftedIndexJ]))
