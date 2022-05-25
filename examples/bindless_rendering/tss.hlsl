@@ -188,7 +188,7 @@ void ps_main(
             }
             else
             {
-                upsampledJitter = t_HistoryColor.Sample(s_LinearSampler, shiftedIPosition * g_View.viewportSizeInv).xyz;
+                upsampledJitter = t_JitteredCurrentBuffer.Sample(s_LinearSampler, shiftedIPosition * g_View.viewportSizeInv).xyz;
             }
             
             float3 currSample = float3(0.0f, 0.0f, 0.0f);
@@ -264,6 +264,11 @@ void ps_main(
     }
 
     float confidenceFactor = 1.0f - tempMaNormSqrdDiff / (tempMaximalMaSqrd + epsilon);//based on ma correspondence
+    float2 prevLocationCriterion = prevLocation[blockSize / 2][blockSize / 2];
+    if (prevLocationCriterion.x < 0.0f || prevLocationCriterion.y < 0.0f || prevLocationCriterion.x > 1.0f || prevLocationCriterion.y > 1.0f)
+    {
+        confidenceFactor = 0.0f;
+    }
     //confidenceFactor = 1.0f;
     float currentContribution = 0.1f;
     switch (b_FrameIndex.currentAAMode)
