@@ -242,9 +242,11 @@ public:
             BackBufferResizing();
             return true;
         }
-        if (key == GLFW_KEY_0 && action == GLFW_PRESS)
+        if (key >= GLFW_KEY_0 && key <= GLFW_KEY_0 + PLACE_HOLDER && action == GLFW_PRESS)
         {
-
+            m_currentAAMode = key - GLFW_KEY_0;
+            BackBufferResizing();
+            return true;
         }
         if (key == GLFW_KEY_C)
         {
@@ -902,8 +904,8 @@ int main(int __argc, const char** __argv)
     deviceParams.enableNvrhiValidationLayer = true;
 #endif
     //deviceParams.vsyncEnabled = true;
-    deviceParams.backBufferWidth = 1920;
-    deviceParams.backBufferHeight = 1080;
+    deviceParams.backBufferWidth = 3440;
+    deviceParams.backBufferHeight = 1440;
 
     if (!deviceManager->CreateWindowDeviceAndSwapChain(deviceParams, g_WindowTitle))
     {

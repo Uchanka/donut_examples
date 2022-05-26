@@ -118,7 +118,7 @@ float cubicBSplineValue(float2 center, float2 position, float h)
     return Nx * Ny;
 }
 
-float catmullRomValue()
+float catmullRomValue(float2 center, float2 position, float h)
 {
     return 0.0f;
 }
@@ -188,8 +188,8 @@ void ps_main(
                     float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
                     float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
 
-                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * (1.0f + i_Position.z));
-                    //float probedSampleWeight = cubicBSplineValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
+                    //float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * (1.0f + i_Position.z));
+                    float probedSampleWeight = cubicBSplineValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
 
                     upsampledJitter += probedSampleWeight * probedJitteredSample.xyz;
                     normalizationFactor += probedSampleWeight;
@@ -294,6 +294,7 @@ void ps_main(
                 float sigmaComponent = allInvSigmaTemporal[compT];
                 allInvSigmaTemporal[compT] = (sigmaComponent < epsilon) ? 1.0f / epsilon : 1.0f / sigmaComponent;
             }
+            //allInvSigmaTemporal *= varSqrdSpac[shiftedIndexK][shiftedIndexL];
 
             tempMaNormSqrdDiff += dot(diffVector * diffVector, allInvSigmaTemporal);
             tempMaximalMaSqrd += dot(currVector * currVector, allInvSigmaTemporal);
@@ -302,6 +303,7 @@ void ps_main(
     }
 
     float confidenceFactor = 1.0f - sqrt(tempMaNormSqrdDiff) / (sqrt(tempMaximalMaSqrd) + epsilon);//based on ma correspondence
+    confidenceFactor = clamp(confidenceFactor, 0.0f, 1.0f);
     //confidenceFactor *= 1.0f - length(perPixelVelocity[blockSize / 2][blockSize / 2]);
     //confidenceFactor = log(confidenceFactor);
     //confidenceFactor *= confidenceFactor;
@@ -340,10 +342,14 @@ void ps_main(
 
     float3 centerHist = hist[blockSize / 2][blockSize / 2];
     float3 centerCurr = curr[blockSize / 2][blockSize / 2];
-    //centerHist = max(min(centerHist, maximalCurr), minimalCurr);
-
+    
     float historyContribution = (1.0f - currentContribution) * confidenceFactor;
     currentContribution = 1.0f - historyContribution;
+
+    /*centerHist = max(min(centerHist, maximalCurr), minimalCurr);
+    currentContribution = 0.1f;
+    historyContribution = 1.0f - currentContribution;*/
+
     float3 blended = float3(0.0f, 0.0f, 0.0f);
     if (b_FrameIndex.frameHasReset == 0)
     {
