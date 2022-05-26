@@ -149,8 +149,8 @@ void ps_main(
     float2 pixelOffset = g_View.pixelOffset;
     float samplingRate = ((b_FrameIndex.currentAAMode == nativeResolution || b_FrameIndex.currentAAMode == nativeWithTAA) ? 1.0f : g_SamplingRate.samplingRate);
 
-    const int blockSize = 5;
-    const int patchSize = 5;
+    const int blockSize = 3;
+    const int patchSize = 3;
     const float normalizationFactorPatch = 1.0f / (patchSize * patchSize);
     const float normalizationFactorBlock = 1.0f / (blockSize * blockSize);
     float3 curr[blockSize][blockSize];
@@ -161,6 +161,7 @@ void ps_main(
     float3 perPixelVelocity[blockSize][blockSize];
     float2 prevLocation[blockSize][blockSize];
     float maximalConfidence[blockSize][blockSize];
+    float summedConfidence[blockSize][blockSize];
 
     [unroll]
     for (int di = -(blockSize / 2); di <= (blockSize / 2); ++di)
@@ -187,7 +188,7 @@ void ps_main(
                     float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
                     float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
 
-                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
+                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * (1.0f + i_Position.z));
                     //float probedSampleWeight = cubicBSplineValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
 
                     upsampledJitter += probedSampleWeight * probedJitteredSample.xyz;
@@ -213,6 +214,8 @@ void ps_main(
 
             int shiftedIndexI = di + blockSize / 2;
             int shiftedIndexJ = dj + blockSize / 2;
+
+            summedConfidence[shiftedIndexI][shiftedIndexJ] = normalizationFactor;
 
             if (b_FrameIndex.currentAAMode != temporalSupersamplingAA)
             {
@@ -280,10 +283,11 @@ void ps_main(
             float3 currVector = curr[shiftedIndexK][shiftedIndexL];
             float3 histVector = hist[shiftedIndexK][shiftedIndexL];
             float3 deriVector = deri[shiftedIndexK][shiftedIndexL];
-            float3 diffVector = abs(currVector - histVector) * maximalConfidence[shiftedIndexK][shiftedIndexL] + abs(deriVector - histVector);
-            //minimalCurr = min(minimalCurr, currVector - 2.0 * varSqrdTemp[shiftedIndexK][shiftedIndexL]);
-            //maximalCurr = max(maximalCurr, currVector + 2.0 * varSqrdTemp[shiftedIndexK][shiftedIndexL]);
-            //float3 allOneVector = float3(1.0f, 1.0f, 1.0f);
+            float3 diffVector = abs(currVector - histVector) * maximalConfidence[shiftedIndexK][shiftedIndexL] + (1.0f - maximalConfidence[shiftedIndexK][shiftedIndexL]) * abs(deriVector - histVector);
+            
+            minimalCurr = min(minimalCurr, currVector);
+            maximalCurr = max(maximalCurr, currVector);
+            //float3 allInvSigmaTemporal = float3(1.0f, 1.0f, 1.0f);
             float3 allInvSigmaTemporal = varSqrdTemp[shiftedIndexK][shiftedIndexL];
             for (int compT = 0; compT < sizeof(allInvSigmaTemporal) / sizeof(allInvSigmaTemporal[0]); ++compT)
             {
@@ -300,7 +304,7 @@ void ps_main(
     float confidenceFactor = 1.0f - sqrt(tempMaNormSqrdDiff) / (sqrt(tempMaximalMaSqrd) + epsilon);//based on ma correspondence
     //confidenceFactor *= 1.0f - length(perPixelVelocity[blockSize / 2][blockSize / 2]);
     //confidenceFactor = log(confidenceFactor);
-    //confidenceFactor *= confidenceFactor * confidenceFactor;
+    //confidenceFactor *= confidenceFactor;
     //confidenceFactor *= confidenceFactor * confidenceFactor;
     float2 prevLocationCriterion = prevLocation[blockSize / 2][blockSize / 2];
     if (!isWithInNDC(prevLocation[blockSize / 2][blockSize / 2]))
@@ -310,7 +314,9 @@ void ps_main(
     //confidenceFactor = 1.0f;
 
     int2 momentTexelIndex = int2(floor(i_Position.xy));
-    float effectiveSamples = 1.0f / t_SequenceSqrdSum[momentTexelIndex];
+    float summedAlphaSqrd = t_SequenceSqrdSum[momentTexelIndex];
+    summedAlphaSqrd = summedAlphaSqrd < epsilon ? 1.0f : summedAlphaSqrd;
+    float effectiveSamples = 1.0f / summedAlphaSqrd;
     //float currentContribution = 0.1f;
     float currentContribution = 1.0f / (effectiveSamples + 1.0f);
     switch (b_FrameIndex.currentAAMode)
@@ -341,13 +347,17 @@ void ps_main(
     float3 blended = float3(0.0f, 0.0f, 0.0f);
     if (b_FrameIndex.frameHasReset == 0)
     {
-        if (maximalConfidence[blockSize / 2][blockSize / 2] == 0.0f)
+        if (maximalConfidence[blockSize / 2][blockSize / 2] < epsilon)
         {
             currentContribution = 0.0f;
             historyContribution = 1.0f;
         }
         blended = currentContribution * centerCurr + historyContribution * centerHist;
     }
+    /*if (isWithInNDC(prevLocation[blockSize / 2][blockSize / 2]))
+    {
+        blended += maximalConfidence[blockSize / 2][blockSize / 2] * (deri[blockSize / 2][blockSize / 2] - hist[blockSize / 2][blockSize / 2]);
+    }*/
     
     float3 firstOrderHist = t_1stOrderMoment[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])].xyz;
     float3 secondOrderHist = t_2ndOrderMoment[int2(g_View.viewportSize * prevLocation[blockSize / 2][blockSize / 2])].xyz;

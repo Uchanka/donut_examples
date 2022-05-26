@@ -144,7 +144,7 @@ private:
     
     bool m_EnableAnimations = true;
     int m_currentAAMode = TEMPORAL_SUPERSAMPLING;
-    float m_slidingSamplingRate = 1.0f / 1.5f;
+    float m_slidingSamplingRate = 1.0f / 2.0f;
     float m_WallclockTime = 0.f;
 
 public:
@@ -901,7 +901,7 @@ int main(int __argc, const char** __argv)
     deviceParams.enableDebugRuntime = true; 
     deviceParams.enableNvrhiValidationLayer = true;
 #endif
-    deviceParams.vsyncEnabled = true;
+    //deviceParams.vsyncEnabled = true;
     deviceParams.backBufferWidth = 1920;
     deviceParams.backBufferHeight = 1080;
 
