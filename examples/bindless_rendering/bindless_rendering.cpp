@@ -153,7 +153,7 @@ private:
     
     bool m_EnableAnimations = true;
     int m_currentAAMode = TEMPORAL_SUPERSAMPLING;
-    float m_slidingSamplingRate = 1.0f / 2.0f;
+    float m_slidingSamplingRate = 1.0f / 4.0f;
     float m_WallclockTime = 0.f;
 
     //Side by side records
@@ -304,6 +304,7 @@ public:
         }
         if (key == GLFW_KEY_P && action == GLFW_PRESS)
         {
+            BackBufferResizing();
             currentFrameIndex = 0;
             bReplayCapturedFrame = !bReplayCapturedFrame;
         }
