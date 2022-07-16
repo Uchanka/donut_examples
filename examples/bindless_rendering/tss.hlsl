@@ -188,7 +188,7 @@ void ps_main(
                     float2 probedSamplePosition = float2(probedSampleIndex) + float2(0.5f, 0.5f) - pixelOffset;
                     float3 probedJitteredSample = t_JitteredCurrentBuffer[probedSampleIndex].xyz;
 
-                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
+                    float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, 2.0f * samplingRate);
                     //float probedSampleWeight = tentValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate * (1.0f + i_Position.z));
                     //float probedSampleWeight = cubicBSplineValue(jitterSpaceSVPosition, probedSamplePosition, samplingRate);
 
@@ -265,6 +265,7 @@ void ps_main(
     float tempMaximalMaSqrd = 0.0f;
     
     const float epsilon = 0.00001f;
+    const float gaussianKernel[blockSize][blockSize] = { {0.0625f, 0.125f, 0.0625f}, {0.125f, 0.25f, 0.125f}, {0.0625f, 0.125f, 0.0625f} };
 
     float3 minimalCurr = float3(1.0f, 1.0f, 1.0f);
     float3 maximalCurr = float3(0.0f, 0.0f, 0.0f);
@@ -276,7 +277,8 @@ void ps_main(
             int shiftedIndexK = dk + blockSize / 2;
             int shiftedIndexL = dl + blockSize / 2;
 
-            if (maximalConfidence[shiftedIndexK][shiftedIndexL] == 0.0f)
+            float diffConfidence = maximalConfidence[shiftedIndexK][shiftedIndexL];
+            if (diffConfidence < epsilon)
             {
                 continue;
             }
@@ -284,7 +286,9 @@ void ps_main(
             float3 currVector = curr[shiftedIndexK][shiftedIndexL];
             float3 histVector = hist[shiftedIndexK][shiftedIndexL];
             float3 deriVector = deri[shiftedIndexK][shiftedIndexL];
-            float3 diffVector = abs(currVector - histVector) * maximalConfidence[shiftedIndexK][shiftedIndexL] + (1.0f - maximalConfidence[shiftedIndexK][shiftedIndexL]) * abs(deriVector - histVector);
+            float3 diffVector = abs(currVector - histVector) * maximalConfidence[shiftedIndexK][shiftedIndexL];
+            //diffVector += (1.0f - maximalConfidence[shiftedIndexK][shiftedIndexL]) * abs(currVector - histVector);
+            //diffVector += (1.0f - maximalConfidence[shiftedIndexK][shiftedIndexL]) * abs(deriVector - histVector);
             
             minimalCurr = min(minimalCurr, currVector);
             maximalCurr = max(maximalCurr, currVector);
@@ -305,6 +309,7 @@ void ps_main(
 
     float derivativeDiffed = sqrt(tempMaNormSqrdDiff) / (sqrt(tempMaximalMaSqrd) + epsilon);//based on ma correspondence
     derivativeDiffed = clamp(derivativeDiffed, 0.0f, 1.0f);
+    //derivativeDiffed > optimalSampleCountAlpha?
     
     float2 prevLocationCriterion = prevLocation[blockSize / 2][blockSize / 2];
     if (!isWithInNDC(prevLocationCriterion))

@@ -58,6 +58,15 @@ struct FSRConstants
     uint32_t4 Sample;
 };
 
+struct CameraRolling
+{
+    dm::float3 pos;
+    dm::float3 dir;
+    dm::float3 up;
+    CameraRolling() {}
+    CameraRolling(const dm::float3& pos, const dm::float3& dir, const dm::float3& up) : pos(pos), dir(dir), up(up) {}
+};
+
 class BindlessRendering : public app::ApplicationBase
 {
 private:
@@ -147,11 +156,38 @@ private:
     float m_slidingSamplingRate = 1.0f / 2.0f;
     float m_WallclockTime = 0.f;
 
+    //Side by side records
+    std::vector<CameraRolling> camTrails;
+    size_t currentFrameIndex;
+    size_t recordedFrameIndex;
+    static const size_t maximalFrameIndex = 5 * 60 * 120;
+    bool bRecordCurrentTrajectory;
+    bool bReplayCapturedFrame;
+
+    void setCamera()
+    {
+        m_Camera.SetPosition(camTrails[currentFrameIndex].pos);
+        m_Camera.SetDir(camTrails[currentFrameIndex].dir);
+        m_Camera.SetUp(camTrails[currentFrameIndex].up);
+        m_Camera.UpdateWorldToView();
+    }
+
+    CameraRolling getCamera()
+    {
+        return CameraRolling(m_Camera.GetPosition(), m_Camera.GetDir(), m_Camera.GetUp());
+    }
+
 public:
     using ApplicationBase::ApplicationBase;
 
     bool Init()
     {
+        currentFrameIndex = 0;
+        recordedFrameIndex = 0;
+        camTrails.resize(maximalFrameIndex);
+        bRecordCurrentTrajectory = false;
+        bReplayCapturedFrame = false;
+
         std::filesystem::path sceneFileName = app::GetDirectoryWithExecutable().parent_path() / "media/sponza-plus.scene.json";
         std::filesystem::path frameworkShaderPath = app::GetDirectoryWithExecutable() / "shaders/framework" / app::GetShaderTypeName(GetDevice()->getGraphicsAPI());
         std::filesystem::path appShaderPath = app::GetDirectoryWithExecutable() / "shaders/bindless_rendering" / app::GetShaderTypeName(GetDevice()->getGraphicsAPI());
@@ -251,6 +287,25 @@ public:
         if (key == GLFW_KEY_C)
         {
             captureCurrentFrame();
+        }
+        if (key == GLFW_KEY_R && action == GLFW_PRESS)
+        {
+            if (bRecordCurrentTrajectory)
+            {
+                recordedFrameIndex = currentFrameIndex;
+                currentFrameIndex = 0;
+            }
+            else
+            {
+                currentFrameIndex = 0;
+                recordedFrameIndex = 0;
+            }
+            bRecordCurrentTrajectory = !bRecordCurrentTrajectory;
+        }
+        if (key == GLFW_KEY_P && action == GLFW_PRESS)
+        {
+            currentFrameIndex = 0;
+            bReplayCapturedFrame = !bReplayCapturedFrame;
         }
 
         return true;
@@ -760,6 +815,24 @@ public:
             createRCASPipeline();
         }
 
+        if (bRecordCurrentTrajectory)
+        {
+            if (currentFrameIndex < maximalFrameIndex)
+            {
+                CameraRolling roll = getCamera();
+                camTrails[currentFrameIndex] = roll;
+                ++currentFrameIndex;
+            }
+        }
+        if (bReplayCapturedFrame)
+        {
+            if (currentFrameIndex < recordedFrameIndex)
+            {
+                setCamera();
+                ++currentFrameIndex;
+            }
+        }
+
         m_CommandList->open();
         
         if (frameHasBeenReset)
@@ -874,11 +947,19 @@ public:
 
         m_CommandList->close();
         GetDevice()->executeCommandList(m_CommandList);
+
+        if (bReplayCapturedFrame)
+        {
+            if (currentFrameIndex < recordedFrameIndex)
+            {
+                captureCurrentFrame();
+            }
+        }
     }
 
     void captureCurrentFrame()
     {
-        std::string frameBmpName = "./Frame" + currentAAModeToStr + ".bmp";
+        std::string frameBmpName = "./" + currentAAModeToStr + "_" + std::to_string(currentFrameIndex) + ".bmp";
         donut::engine::SaveTextureToFile(GetDevice(), m_CommonPasses.get(), m_ColorBufferBackup, nvrhi::ResourceStates::RenderTarget, frameBmpName.c_str());
     }
 };
@@ -903,9 +984,9 @@ int main(int __argc, const char** __argv)
     deviceParams.enableDebugRuntime = true; 
     deviceParams.enableNvrhiValidationLayer = true;
 #endif
-    //deviceParams.vsyncEnabled = true;
-    deviceParams.backBufferWidth = 3440;
-    deviceParams.backBufferHeight = 1440;
+    deviceParams.vsyncEnabled = true;
+    deviceParams.backBufferWidth = 1920;
+    deviceParams.backBufferHeight = 1080;
 
     if (!deviceManager->CreateWindowDeviceAndSwapChain(deviceParams, g_WindowTitle))
     {
